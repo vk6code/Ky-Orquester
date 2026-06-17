@@ -16,7 +16,8 @@
     "@fastify/websocket": "^10.0.1",
     "@orquester/api": "workspace:*",
     "@orquester/config": "workspace:*",
-    "fastify": "^4.28.1"
+    "fastify": "^4.28.1",
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.32",

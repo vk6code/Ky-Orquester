@@ -1,5 +1,7 @@
 import {
   buildQueryString,
+  type StreamHandle,
+  type StreamHandlers,
   type Transporter,
   type TransportRequest,
   type TransportResponse
@@ -63,5 +65,41 @@ export class HttpTransporter implements Transporter {
       data,
       headers: response.headers
     };
+  }
+
+  openStream(path: string, handlers: StreamHandlers): StreamHandle {
+    const controller = new AbortController();
+    const headers: Record<string, string> = {};
+    if (this.password) {
+      headers.Authorization = `Bearer ${this.password}`;
+    }
+
+    fetch(`${this.baseUrl}${path}`, { headers, signal: controller.signal })
+      .then((response) => {
+        if (!response.body) {
+          handlers.onEnd();
+          return;
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const pump = (): Promise<void> =>
+          reader.read().then(({ done, value }) => {
+            if (done) {
+              handlers.onEnd();
+              return;
+            }
+            handlers.onData(decoder.decode(value, { stream: true }));
+            return pump();
+          });
+        return pump();
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          handlers.onError?.(error);
+        }
+        handlers.onEnd();
+      });
+
+    return { close: () => controller.abort() };
   }
 }

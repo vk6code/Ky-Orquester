@@ -1,11 +1,13 @@
 import {
   buildQueryString,
+  type StreamHandle,
+  type StreamHandlers,
   type Transporter,
   type TransportRequest,
   type TransportResponse
 } from "@orquester/ui";
 
-/** Shape exchanged with the Electron main process over IPC. */
+/** Shape exchanged with the Electron main process over IPC for unary requests. */
 export interface DesktopBridgeRequest {
   method: string;
   path: string;
@@ -20,17 +22,25 @@ export interface DesktopBridgeResponse {
   body: string;
 }
 
-export type DesktopRequestFn = (request: DesktopBridgeRequest) => Promise<DesktopBridgeResponse>;
+/** The full bridge the preload exposes for talking to the daemon over the socket. */
+export interface DesktopBridge {
+  request(request: DesktopBridgeRequest): Promise<DesktopBridgeResponse>;
+  streamOpen(streamId: string, path: string): void;
+  streamClose(streamId: string): void;
+  onStreamData(cb: (payload: { streamId: string; chunk: string }) => void): () => void;
+  onStreamEnd(cb: (payload: { streamId: string }) => void): () => void;
+}
 
 /**
  * Transporter for the desktop runtime. The renderer cannot open a unix socket
- * directly, so requests are forwarded over the Electron IPC bridge to the main
- * process, which performs the actual HTTP-over-unix-socket call to the daemon.
+ * directly, so requests and chunked streams are forwarded over the Electron IPC
+ * bridge to the main process, which performs the actual HTTP-over-unix-socket
+ * calls to the daemon.
  */
 export class UnixSocketTransporter implements Transporter {
   readonly kind = "unix";
 
-  constructor(private readonly send: DesktopRequestFn) {}
+  constructor(private readonly bridge: DesktopBridge) {}
 
   async request<T = unknown>(req: TransportRequest): Promise<TransportResponse<T>> {
     const headers: Record<string, string> = { ...req.headers };
@@ -41,7 +51,7 @@ export class UnixSocketTransporter implements Transporter {
       body = JSON.stringify(req.body);
     }
 
-    const response = await this.send({
+    const response = await this.bridge.request({
       method: req.method,
       path: `${req.path}${buildQueryString(req.query)}`,
       headers,
@@ -55,6 +65,39 @@ export class UnixSocketTransporter implements Transporter {
       ok: response.ok,
       data,
       headers: response.headers
+    };
+  }
+
+  openStream(path: string, handlers: StreamHandlers): StreamHandle {
+    const streamId = crypto.randomUUID();
+    let closed = false;
+
+    const offData = this.bridge.onStreamData(({ streamId: id, chunk }) => {
+      if (id === streamId) {
+        handlers.onData(chunk);
+      }
+    });
+    const offEnd = this.bridge.onStreamEnd(({ streamId: id }) => {
+      if (id === streamId && !closed) {
+        closed = true;
+        offData();
+        offEnd();
+        handlers.onEnd();
+      }
+    });
+
+    this.bridge.streamOpen(streamId, path);
+
+    return {
+      close: () => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        offData();
+        offEnd();
+        this.bridge.streamClose(streamId);
+      }
     };
   }
 }

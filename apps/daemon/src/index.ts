@@ -1,13 +1,20 @@
-import websocket from "@fastify/websocket";
 import type {
   CreateProjectRequest,
+  CreateSessionRequest,
   CreateWorkspaceRequest,
   EventMessage,
   HealthResponse,
   ProjectSummary,
+  RegistryResponse,
   ServerInfoResponse,
+  SessionInputRequest,
+  SessionResizeRequest,
+  SessionSummary,
   WorkspaceSummary
 } from "@orquester/api";
+import { RegistryService } from "./registry";
+import { SessionError, SessionManager } from "./sessions";
+import { Broadcaster } from "./broadcaster";
 import {
   type ClientConfig,
   type DaemonConfig,
@@ -60,12 +67,30 @@ async function main(): Promise<void> {
 
   const logStream = createWriteStream(dailyLogFile(resolved.logsDir), { flags: "a" });
   const clientConfig = createDefaultClientConfig(paths.socketPath);
+
+  // Shared, transport-agnostic services. Sessions live here so they survive
+  // client disconnects and are visible across every transport/client.
+  const registry = new RegistryService(resolved.daemonDir);
+  await registry.init();
+  const sessions = new SessionManager(registry);
+  const broadcaster = new Broadcaster();
+  sessions.lifecycle.on("created", (s: SessionSummary) =>
+    broadcaster.publish("sessions", "session.created", s)
+  );
+  sessions.lifecycle.on("exited", (s: SessionSummary) =>
+    broadcaster.publish("sessions", "session.exited", s)
+  );
+  sessions.lifecycle.on("closed", (payload: { id: string }) =>
+    broadcaster.publish("sessions", "session.closed", payload)
+  );
+
+  const services: Services = { registry, sessions, broadcaster };
   const started: string[] = [];
   const servers: FastifyInstance[] = [];
 
   // The local unix socket transport is always present.
   {
-    const app = createServer(config, resolved, clientConfig, logStream, {
+    const app = createServer(config, resolved, clientConfig, logStream, services, {
       authRequired: false,
       mode: "local"
     });
@@ -81,7 +106,7 @@ async function main(): Promise<void> {
 
   // The external HTTP transport is opt-in (daemon.json -> transports.http.enabled).
   if (config.transports.http.enabled) {
-    const app = createServer(config, resolved, clientConfig, logStream, {
+    const app = createServer(config, resolved, clientConfig, logStream, services, {
       authRequired: true,
       mode: "remote"
     });
@@ -93,12 +118,18 @@ async function main(): Promise<void> {
     started.push(`http://${config.transports.http.host}:${config.transports.http.port}`);
   }
 
-  process.on("SIGINT", () => shutdown(servers));
-  process.on("SIGTERM", () => shutdown(servers));
+  process.on("SIGINT", () => shutdown(servers, sessions));
+  process.on("SIGTERM", () => shutdown(servers, sessions));
 
   console.log(
     `Orquester daemon ${daemonId} listening on ${started.join(", ")} (workspaces: ${resolved.workspacesDir})`
   );
+}
+
+interface Services {
+  registry: RegistryService;
+  sessions: SessionManager;
+  broadcaster: Broadcaster;
 }
 
 function createServer(
@@ -106,13 +137,13 @@ function createServer(
   resolved: ResolvedPaths,
   clientConfig: ClientConfig,
   logStream: WriteStream,
+  services: Services,
   options: { authRequired: boolean; mode: "local" | "remote" }
 ): FastifyInstance {
+  const { registry, sessions } = services;
   const app = Fastify({
     logger: { level: "info", stream: logStream }
   });
-
-  void app.register(websocket);
 
   app.addHook("onRequest", async (request, reply) => {
     if (!options.authRequired || request.url === "/health") {
@@ -143,9 +174,9 @@ function createServer(
     dataDir: resolved.daemonDir,
     workspacesDir: resolved.workspacesDir,
     capabilities: {
-      terminals: false,
-      sessions: false,
-      agents: false,
+      terminals: true,
+      sessions: true,
+      agents: true,
       docker: false
     }
   }));
@@ -197,22 +228,121 @@ function createServer(
     }
   );
 
-  app.get("/events", { websocket: true }, (connection) => {
+  // --- Registry (shells & agents) ------------------------------------------
+  app.get("/api/registry", async (): Promise<RegistryResponse> => registry.list());
+
+  app.get<{ Params: { id: string } }>("/api/registry/:id/version", async (request) =>
+    registry.version(request.params.id)
+  );
+
+  app.post<{ Params: { id: string } }>("/api/registry/:id/install", async (request) =>
+    registry.install(request.params.id)
+  );
+
+  app.post<{ Params: { id: string } }>("/api/registry/:id/update", async (request) =>
+    registry.update(request.params.id)
+  );
+
+  // --- Sessions (PTYs) -----------------------------------------------------
+  app.get<{ Querystring: { projectPath?: string } }>(
+    "/api/sessions",
+    async (request): Promise<SessionSummary[]> => sessions.list(request.query.projectPath)
+  );
+
+  app.post("/api/sessions", async (request, reply): Promise<SessionSummary | void> => {
+    try {
+      return sessions.create((request.body ?? {}) as CreateSessionRequest);
+    } catch (error) {
+      const message = error instanceof SessionError ? error.message : "Failed to create session.";
+      return reply.code(400).send({ code: "SESSION_UNAVAILABLE", message });
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/sessions/:id",
+    async (request, reply): Promise<void> => {
+      const ok = sessions.close(request.params.id);
+      return reply.code(ok ? 204 : 404).send();
+    }
+  );
+
+  app.post<{ Params: { id: string }; Body: SessionInputRequest }>(
+    "/api/sessions/:id/input",
+    async (request, reply): Promise<void> => {
+      sessions.input(request.params.id, request.body?.data ?? "");
+      return reply.code(204).send();
+    }
+  );
+
+  app.post<{ Params: { id: string }; Body: SessionResizeRequest }>(
+    "/api/sessions/:id/resize",
+    async (request, reply): Promise<void> => {
+      const { cols, rows } = request.body ?? { cols: 0, rows: 0 };
+      sessions.resize(request.params.id, cols, rows);
+      return reply.code(204).send();
+    }
+  );
+
+  // Live output stream: replays the current buffer, then streams raw PTY bytes
+  // until the session exits or the client disconnects. Plain chunked HTTP so it
+  // works identically over the unix socket and over remote HTTP. Input/resize
+  // use the POST endpoints above.
+  app.get<{ Params: { id: string } }>("/api/sessions/:id/output", (request, reply) => {
+    const { id } = request.params;
+    const summary = sessions.get(id);
+    if (!summary) {
+      void reply.code(404).send();
+      return;
+    }
+
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "cache-control": "no-cache",
+      "x-accel-buffering": "no"
+    });
+    reply.raw.write(sessions.buffer(id));
+
+    if (summary.status === "exited") {
+      reply.raw.end();
+      return;
+    }
+
+    const unsubscribe = sessions.subscribe(
+      id,
+      (data) => reply.raw.write(data),
+      () => reply.raw.end()
+    );
+    request.raw.on("close", unsubscribe);
+  });
+
+  // Daemon event bus (newline-delimited JSON): lifecycle broadcasts + heartbeat.
+  app.get("/events", (request, reply) => {
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-cache",
+      "x-accel-buffering": "no"
+    });
+
+    const sink = { send: (data: string) => reply.raw.write(`${data}\n`) };
+    services.broadcaster.add(sink);
+
     const timer = setInterval(() => {
       const event: EventMessage = {
         id: randomUUID(),
         channel: "daemon",
         type: "daemon.heartbeat",
         createdAt: new Date().toISOString(),
-        payload: {
-          daemonId
-        }
+        payload: { daemonId }
       };
+      sink.send(JSON.stringify(event));
+    }, 15_000);
 
-      connection.send(JSON.stringify(event));
-    }, 10_000);
-
-    connection.on("close", () => clearInterval(timer));
+    request.raw.on("close", () => {
+      clearInterval(timer);
+      services.broadcaster.remove(sink);
+    });
   });
 
   return app;
@@ -347,7 +477,8 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
-async function shutdown(servers: FastifyInstance[]): Promise<void> {
+async function shutdown(servers: FastifyInstance[], sessions: SessionManager): Promise<void> {
+  sessions.closeAll();
   await Promise.all(servers.map((server) => server.close()));
   process.exit(0);
 }

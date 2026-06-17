@@ -132,8 +132,45 @@ function requestOverSocket({ method, path: requestPath, headers, body }) {
   });
 }
 
+// Active chunked streams (session output / event bus) keyed by renderer id.
+const streams = new Map();
+
+function openStreamOverSocket(event, { streamId, path }) {
+  const req = http.request({ socketPath: daemonSocketPath, path, method: "GET" }, (res) => {
+    res.setEncoding("utf8");
+    res.on("data", (chunk) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("orquester:stream:data", { streamId, chunk });
+      }
+    });
+    res.on("end", () => {
+      streams.delete(streamId);
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("orquester:stream:end", { streamId });
+      }
+    });
+  });
+  req.on("error", () => {
+    streams.delete(streamId);
+    if (!event.sender.isDestroyed()) {
+      event.sender.send("orquester:stream:end", { streamId });
+    }
+  });
+  req.end();
+  streams.set(streamId, req);
+}
+
 function registerIpc() {
   ipcMain.handle("orquester:request", (_event, request) => requestOverSocket(request));
+
+  ipcMain.on("orquester:stream:open", (event, payload) => openStreamOverSocket(event, payload));
+  ipcMain.on("orquester:stream:close", (_event, streamId) => {
+    const req = streams.get(streamId);
+    if (req) {
+      req.destroy();
+      streams.delete(streamId);
+    }
+  });
 
   ipcMain.on("orquester:window", (_event, action) => {
     if (!mainWindow) {

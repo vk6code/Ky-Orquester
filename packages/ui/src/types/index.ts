@@ -1,7 +1,13 @@
 import type {
   AgentSummary,
+  EventMessage,
   OpenTargetSummary,
   ProjectSummary,
+  RegistryEntry,
+  RegistryKind,
+  RegistryResponse,
+  SessionStatus,
+  SessionSummary,
   WorkspaceSummary
 } from "@orquester/api";
 
@@ -26,15 +32,15 @@ export interface UiConnection {
   password?: string;
 }
 
-export type TabKind = "terminal" | "files" | "agent";
-
-/** A tab open inside the main view of the selected project. */
-export interface Tab {
-  id: string;
-  kind: TabKind;
-  title: string;
-  /** For agent tabs, the id of the backing agent adapter. */
-  agentId?: string;
-}
-
-export type { AgentSummary, OpenTargetSummary, ProjectSummary, WorkspaceSummary };
+export type {
+  AgentSummary,
+  EventMessage,
+  OpenTargetSummary,
+  ProjectSummary,
+  RegistryEntry,
+  RegistryKind,
+  RegistryResponse,
+  SessionStatus,
+  SessionSummary,
+  WorkspaceSummary
+};

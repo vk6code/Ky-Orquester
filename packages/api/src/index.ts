@@ -75,6 +75,94 @@ export interface OpenTargetSummary {
   available: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Registry — shells & agents share the same shape.
+// ---------------------------------------------------------------------------
+
+export type RegistryKind = "shell" | "agent";
+
+export interface RegistryEntry {
+  id: string;
+  name: string;
+  kind: RegistryKind;
+  /** Candidate binaries; the first found in PATH wins (cached by the daemon). */
+  bin: string[];
+  /** True only when a candidate bin resolved AND the entry is not disabled. */
+  enabled: boolean;
+  /** Absolute path of the resolved bin, when found. */
+  resolvedBin?: string;
+  /** Flag to print a version (agents only), e.g. "--version". */
+  versionFlag?: string;
+  /** Shell command to install the bin (agents only). */
+  installCmd?: string;
+  /** Shell command to update the bin (agents only). */
+  updateCmd?: string;
+}
+
+export interface RegistryResponse {
+  shells: RegistryEntry[];
+  agents: RegistryEntry[];
+}
+
+export interface RegistryActionResult {
+  ok: boolean;
+  exitCode: number;
+  output: string;
+}
+
+// ---------------------------------------------------------------------------
+// Sessions — a live PTY (shell or agent) owned by the daemon. Open sessions
+// for a project are that project's tabs; they outlive client disconnects.
+// ---------------------------------------------------------------------------
+
+export type SessionStatus = "running" | "exited";
+
+export interface SessionSummary {
+  id: string;
+  kind: RegistryKind;
+  /** Registry entry id this session was launched from (e.g. "bash", "claude"). */
+  refId: string;
+  title: string;
+  /** Project the tab belongs to ("" = not bound to a project). */
+  projectPath: string;
+  cwd: string;
+  cols: number;
+  rows: number;
+  status: SessionStatus;
+  exitCode?: number;
+  createdAt: string;
+}
+
+export interface CreateSessionRequest {
+  kind: RegistryKind;
+  refId: string;
+  projectPath?: string;
+  cwd?: string;
+  cols?: number;
+  rows?: number;
+  title?: string;
+}
+
+export interface SessionInputRequest {
+  data: string;
+}
+
+export interface SessionResizeRequest {
+  cols: number;
+  rows: number;
+}
+
+/** Frames pushed from daemon to client over the session stream. */
+export type SessionStreamMessage =
+  | { type: "buffer"; data: string }
+  | { type: "output"; data: string }
+  | { type: "exit"; exitCode: number };
+
+/** Frames sent from client to daemon over the session stream. */
+export type SessionInputMessage =
+  | { type: "input"; data: string }
+  | { type: "resize"; cols: number; rows: number };
+
 export interface EventMessage<TPayload = unknown> {
   id: string;
   channel: string;

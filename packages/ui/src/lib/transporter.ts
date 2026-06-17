@@ -32,16 +32,28 @@ export interface TransportResponse<T = unknown> {
 /** Handler invoked for every event pushed over a realtime subscription. */
 export type EventHandler = (event: unknown) => void;
 
+export interface StreamHandlers {
+  /** A decoded text chunk arrived. */
+  onData: (chunk: string) => void;
+  /** The stream ended (server closed it). */
+  onEnd: () => void;
+  onError?: (error: unknown) => void;
+}
+
+export interface StreamHandle {
+  close(): void;
+}
+
 export interface Transporter {
   /** Short identifier for diagnostics, e.g. "unix" | "http". */
   readonly kind: string;
   /** Perform a single request/response round trip. */
   request<T = unknown>(req: TransportRequest): Promise<TransportResponse<T>>;
   /**
-   * Subscribe to the daemon event stream. Optional: not every transport
-   * supports realtime yet. Returns an unsubscribe function.
+   * Open a long-lived chunked GET stream (session output, event bus). Runtime
+   * specific: web uses streaming fetch, desktop bridges over IPC.
    */
-  subscribe?(channels: string[], handler: EventHandler): () => void;
+  openStream(path: string, handlers: StreamHandlers): StreamHandle;
 }
 
 /** Build a querystring (with leading `?`) from a query object, or "" if empty. */

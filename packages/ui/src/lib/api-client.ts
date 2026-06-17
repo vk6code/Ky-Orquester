@@ -1,15 +1,26 @@
 import type {
   AgentSummary,
   CreateProjectRequest,
+  CreateSessionRequest,
   CreateWorkspaceRequest,
+  EventMessage,
   HealthResponse,
   OpenTargetSummary,
   ProjectSummary,
+  RegistryActionResult,
+  RegistryResponse,
   ServerInfoResponse,
+  SessionSummary,
   WorkspaceSummary
 } from "@orquester/api";
 import type { UiConnection } from "../types";
-import type { Transporter, TransportMethod, TransportRequest } from "./transporter";
+import type {
+  StreamHandle,
+  StreamHandlers,
+  Transporter,
+  TransportMethod,
+  TransportRequest
+} from "./transporter";
 
 export interface ApiRequestOptions {
   query?: TransportRequest["query"];
@@ -51,11 +62,29 @@ export class ApiClient {
     return response.data;
   }
 
-  subscribe(channels: string[], handler: (event: unknown) => void): () => void {
-    if (!this.transporter.subscribe) {
-      return () => undefined;
-    }
-    return this.transporter.subscribe(channels, handler);
+  /** Subscribe to the daemon event bus (NDJSON). Returns an unsubscribe fn. */
+  openEvents(onEvent: (event: EventMessage) => void): () => void {
+    let buffer = "";
+    const handle = this.transporter.openStream("/events", {
+      onData: (chunk) => {
+        buffer += chunk;
+        let newline = buffer.indexOf("\n");
+        while (newline !== -1) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          if (line.trim()) {
+            try {
+              onEvent(JSON.parse(line) as EventMessage);
+            } catch {
+              /* ignore malformed line */
+            }
+          }
+          newline = buffer.indexOf("\n");
+        }
+      },
+      onEnd: () => undefined
+    });
+    return () => handle.close();
   }
 
   // --- Daemon meta ---------------------------------------------------------
@@ -101,6 +130,56 @@ export class ApiClient {
 
   listOpenTargets(signal?: AbortSignal): Promise<OpenTargetSummary[]> {
     return this.send("GET", "/api/open-targets", { signal });
+  }
+
+  // --- Registry (shells & agents) ------------------------------------------
+
+  listRegistry(signal?: AbortSignal): Promise<RegistryResponse> {
+    return this.send("GET", "/api/registry", { signal });
+  }
+
+  installRegistryEntry(id: string): Promise<RegistryActionResult> {
+    return this.send("POST", `/api/registry/${encodeURIComponent(id)}/install`);
+  }
+
+  updateRegistryEntry(id: string): Promise<RegistryActionResult> {
+    return this.send("POST", `/api/registry/${encodeURIComponent(id)}/update`);
+  }
+
+  registryVersion(id: string): Promise<RegistryActionResult> {
+    return this.send("GET", `/api/registry/${encodeURIComponent(id)}/version`);
+  }
+
+  // --- Sessions (PTYs) -----------------------------------------------------
+
+  listSessions(projectPath?: string, signal?: AbortSignal): Promise<SessionSummary[]> {
+    return this.send("GET", "/api/sessions", {
+      query: projectPath ? { projectPath } : undefined,
+      signal
+    });
+  }
+
+  createSession(req: CreateSessionRequest): Promise<SessionSummary> {
+    return this.send("POST", "/api/sessions", { body: req });
+  }
+
+  closeSession(id: string): Promise<void> {
+    return this.send("DELETE", `/api/sessions/${encodeURIComponent(id)}`);
+  }
+
+  sendSessionInput(id: string, data: string): Promise<void> {
+    return this.send("POST", `/api/sessions/${encodeURIComponent(id)}/input`, { body: { data } });
+  }
+
+  resizeSession(id: string, cols: number, rows: number): Promise<void> {
+    return this.send("POST", `/api/sessions/${encodeURIComponent(id)}/resize`, {
+      body: { cols, rows }
+    });
+  }
+
+  /** Open the live output stream for a session (buffer replay + live bytes). */
+  openSessionOutput(id: string, handlers: StreamHandlers): StreamHandle {
+    return this.transporter.openStream(`/api/sessions/${encodeURIComponent(id)}/output`, handlers);
   }
 }
 

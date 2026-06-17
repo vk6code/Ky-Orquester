@@ -20,6 +20,8 @@ export {
   type TransportResponse,
   type TransportMethod,
   type EventHandler,
+  type StreamHandle,
+  type StreamHandlers,
   buildQueryString
 } from "./lib/transporter";
 export {
@@ -36,7 +38,12 @@ export {
 } from "./lib/transporters";
 
 // State & data
-export { useAppStore, useCurrentTabs, useActiveTabId, type AppState } from "./store/app";
+export {
+  useAppStore,
+  useProjectSessions,
+  useActiveSessionId,
+  type AppState
+} from "./store/app";
 export * from "./hooks";
 export * from "./services";
 
@@ -46,6 +53,7 @@ export * from "./components/layout";
 export * from "./components/sidebar";
 export * from "./components/topbar";
 export * from "./components/main";
+export * from "./components/terminal";
 
 // Types
 export type {
@@ -53,8 +61,11 @@ export type {
   UiConnection,
   ConnectionKind,
   ConnectionStatus,
-  Tab,
-  TabKind,
+  RegistryEntry,
+  RegistryKind,
+  RegistryResponse,
+  SessionStatus,
+  SessionSummary,
   AgentSummary,
   OpenTargetSummary,
   ProjectSummary,

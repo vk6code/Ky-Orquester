@@ -1,46 +1,51 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 import type { ApiClient } from "../lib/api-client";
 import { workspaceService } from "../services";
-import type { ConnectionStatus, ProjectSummary, Tab, TabKind, WorkspaceSummary } from "../types";
+import type {
+  ConnectionStatus,
+  EventMessage,
+  ProjectSummary,
+  RegistryKind,
+  SessionSummary,
+  WorkspaceSummary
+} from "../types";
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-let tabCounter = 0;
-const nextTabId = () => `tab-${++tabCounter}`;
+/** Module-level handle so we can drop the events subscription on reconnect. */
+let eventsUnsubscribe: (() => void) | null = null;
 
-const TAB_TITLES: Record<TabKind, string> = {
-  terminal: "Terminal",
-  files: "File Explorer",
-  agent: "Agent"
-};
-
-/** Stable empty array so tab selectors don't trigger re-renders. */
-const EMPTY_TABS: Tab[] = [];
+function upsertSession(sessions: SessionSummary[], next: SessionSummary): SessionSummary[] {
+  const index = sessions.findIndex((s) => s.id === next.id);
+  if (index === -1) {
+    return [...sessions, next];
+  }
+  const copy = [...sessions];
+  copy[index] = { ...copy[index], ...next };
+  return copy;
+}
 
 export interface AppState {
-  /** Server manager bound from <OrquesterApp> at startup. */
   api: ApiClient | null;
-  /** Live status of the bound daemon connection. */
   connectionStatus: ConnectionStatus;
 
-  // --- navigation ---
-  /** Workspace folder open in the sidebar (null = workspace list). */
+  // navigation
   currentWorkspace: string | null;
-  /** Project driving the main view (independent of sidebar navigation). */
   currentProject: ProjectSummary | null;
 
-  // --- data ---
+  // data
   workspaces: WorkspaceSummary[];
   workspacesLoading: boolean;
   projects: ProjectSummary[];
   projectsLoading: boolean;
 
-  // --- tabs (kept per project so switching projects doesn't destroy them) ---
-  tabsByProject: Record<string, Tab[]>;
+  /** All daemon sessions; a project's sessions are its tabs. */
+  sessions: SessionSummary[];
+  /** Client-local active tab per project path. */
   activeTabByProject: Record<string, string | null>;
 
   setApi: (api: ApiClient) => void;
-  /** Wait for the daemon to be reachable (handles embedded-daemon startup), then load. */
   connect: () => Promise<void>;
 
   loadWorkspaces: () => Promise<void>;
@@ -52,9 +57,12 @@ export interface AppState {
   createProject: (name: string) => Promise<void>;
   openProject: (project: ProjectSummary) => void;
 
-  addTab: (kind: TabKind, options?: { title?: string; agentId?: string }) => void;
-  closeTab: (id: string) => void;
+  loadSessions: () => Promise<void>;
+  openTab: (kind: RegistryKind, refId: string, title?: string) => Promise<void>;
+  closeTab: (id: string) => Promise<void>;
   activateTab: (id: string) => void;
+
+  applyEvent: (event: EventMessage) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -66,7 +74,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   workspacesLoading: false,
   projects: [],
   projectsLoading: false,
-  tabsByProject: {},
+  sessions: [],
   activeTabByProject: {},
 
   setApi: (api) => set({ api }),
@@ -78,25 +86,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ connectionStatus: "connecting" });
 
-    // The embedded daemon is spawned asynchronously, so poll /health until the
-    // socket answers before loading data, instead of failing on first paint.
+    // The embedded daemon is spawned asynchronously: poll /health first.
     for (let attempt = 0; attempt < 60; attempt += 1) {
       if (get().api !== api) {
-        return; // connection swapped underneath us
+        return;
       }
       try {
         await api.health();
-        set({ connectionStatus: "connected" });
-        await get().loadWorkspaces();
-        return;
+        break;
       } catch {
         await delay(500);
+        if (attempt === 59) {
+          set({ connectionStatus: "error" });
+          return;
+        }
+        continue;
       }
     }
 
-    if (get().api === api) {
-      set({ connectionStatus: "error" });
-    }
+    set({ connectionStatus: "connected" });
+    await Promise.all([get().loadWorkspaces(), get().loadSessions()]);
+
+    // Subscribe to the event bus for cross-client session sync.
+    eventsUnsubscribe?.();
+    eventsUnsubscribe = api.openEvents((event) => get().applyEvent(event));
   },
 
   loadWorkspaces: async () => {
@@ -158,53 +171,56 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openProject: (project) =>
-    set((state) => ({
-      currentProject: project,
-      tabsByProject: project.path in state.tabsByProject
-        ? state.tabsByProject
-        : { ...state.tabsByProject, [project.path]: [] },
-      activeTabByProject:
-        project.path in state.activeTabByProject
-          ? state.activeTabByProject
-          : { ...state.activeTabByProject, [project.path]: null }
-    })),
-
-  addTab: (kind, options) =>
     set((state) => {
-      const project = state.currentProject;
-      if (!project) {
-        return state;
-      }
-      const key = project.path;
-      const tab: Tab = {
-        id: nextTabId(),
-        kind,
-        title: options?.title ?? TAB_TITLES[kind],
-        agentId: options?.agentId
-      };
+      const active = state.activeTabByProject[project.path];
+      const fallback = state.sessions.find((s) => s.projectPath === project.path)?.id ?? null;
       return {
-        tabsByProject: { ...state.tabsByProject, [key]: [...(state.tabsByProject[key] ?? []), tab] },
-        activeTabByProject: { ...state.activeTabByProject, [key]: tab.id }
-      };
-    }),
-
-  closeTab: (id) =>
-    set((state) => {
-      const project = state.currentProject;
-      if (!project) {
-        return state;
-      }
-      const key = project.path;
-      const tabs = (state.tabsByProject[key] ?? []).filter((tab) => tab.id !== id);
-      const wasActive = state.activeTabByProject[key] === id;
-      return {
-        tabsByProject: { ...state.tabsByProject, [key]: tabs },
+        currentProject: project,
         activeTabByProject: {
           ...state.activeTabByProject,
-          [key]: wasActive ? (tabs[tabs.length - 1]?.id ?? null) : state.activeTabByProject[key]
+          [project.path]: active ?? fallback
         }
       };
     }),
+
+  loadSessions: async () => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    try {
+      set({ sessions: await api.listSessions() });
+    } catch (error) {
+      console.error("[orquester] failed to load sessions", error);
+    }
+  },
+
+  openTab: async (kind, refId, title) => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    const project = get().currentProject;
+    const session = await api.createSession({
+      kind,
+      refId,
+      title,
+      projectPath: project?.path ?? "",
+      cwd: project?.path
+    });
+    set((state) => ({
+      sessions: upsertSession(state.sessions, session),
+      activeTabByProject: project
+        ? { ...state.activeTabByProject, [project.path]: session.id }
+        : state.activeTabByProject
+    }));
+  },
+
+  closeTab: async (id) => {
+    const api = get().api;
+    set((state) => removeSession(state, id));
+    await api?.closeSession(id).catch(() => undefined);
+  },
 
   activateTab: (id) =>
     set((state) => {
@@ -213,17 +229,44 @@ export const useAppStore = create<AppState>((set, get) => ({
         return state;
       }
       return { activeTabByProject: { ...state.activeTabByProject, [project.path]: id } };
-    })
+    }),
+
+  applyEvent: (event) => {
+    if (event.channel !== "sessions") {
+      return;
+    }
+    if (event.type === "session.created" || event.type === "session.exited") {
+      const summary = event.payload as SessionSummary;
+      set((state) => ({ sessions: upsertSession(state.sessions, summary) }));
+    } else if (event.type === "session.closed") {
+      const { id } = event.payload as { id: string };
+      set((state) => removeSession(state, id));
+    }
+  }
 }));
 
-/** Tabs of the currently open project (stable ref when unchanged). */
-export function useCurrentTabs(): Tab[] {
-  return useAppStore((s) =>
-    s.currentProject ? (s.tabsByProject[s.currentProject.path] ?? EMPTY_TABS) : EMPTY_TABS
+function removeSession(state: AppState, id: string): Partial<AppState> {
+  const sessions = state.sessions.filter((s) => s.id !== id);
+  const activeTabByProject = { ...state.activeTabByProject };
+  for (const [path, activeId] of Object.entries(activeTabByProject)) {
+    if (activeId === id) {
+      activeTabByProject[path] = sessions.find((s) => s.projectPath === path)?.id ?? null;
+    }
+  }
+  return { sessions, activeTabByProject };
+}
+
+/** Sessions (tabs) of the currently open project. */
+export function useProjectSessions(): SessionSummary[] {
+  const sessions = useAppStore((s) => s.sessions);
+  const project = useAppStore((s) => s.currentProject);
+  return useMemo(
+    () => (project ? sessions.filter((s) => s.projectPath === project.path) : []),
+    [sessions, project]
   );
 }
 
-export function useActiveTabId(): string | null {
+export function useActiveSessionId(): string | null {
   return useAppStore((s) =>
     s.currentProject ? (s.activeTabByProject[s.currentProject.path] ?? null) : null
   );

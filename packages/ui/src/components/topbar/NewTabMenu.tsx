@@ -1,16 +1,29 @@
 import React from "react";
-import { Bot, FolderTree, Plus, TerminalSquare } from "lucide-react";
-import { Dropdown, DropdownEmpty, DropdownItem, DropdownLabel, DropdownSeparator, IconButton } from "../ui";
-import { useAgents } from "../../hooks";
+import { Bot, Download, Plus, TerminalSquare } from "lucide-react";
+import {
+  Dropdown,
+  DropdownEmpty,
+  DropdownItem,
+  DropdownLabel,
+  DropdownSeparator,
+  IconButton
+} from "../ui";
+import { useRegistry } from "../../hooks";
+import { useApi } from "../../context/orquester-context";
 import { useAppStore } from "../../store/app";
 
 /**
- * The "+" new-tab button. Opens a categorized menu: installed Agents (or a
- * "No installed agents" placeholder) and built-in Tools.
+ * The "+" new-tab button. Lists detected shells and agents from the daemon
+ * registry; choosing one opens a live session (tab) in the current project.
+ * Disabled agents offer a one-click install instead.
  */
 export const NewTabMenu: React.FC = () => {
-  const addTab = useAppStore((s) => s.addTab);
-  const { data: agents, loading } = useAgents();
+  const openTab = useAppStore((s) => s.openTab);
+  const api = useApi();
+  const { data: registry, loading, reload } = useRegistry();
+
+  const enabledShells = registry.shells.filter((s) => s.enabled);
+  const agents = registry.agents;
 
   return (
     <Dropdown
@@ -19,31 +32,49 @@ export const NewTabMenu: React.FC = () => {
           <Plus size={16} />
         </IconButton>
       }
-      width="w-56"
+      width="w-60"
     >
-      <DropdownLabel>Agents</DropdownLabel>
+      <DropdownLabel>Shells</DropdownLabel>
       {loading && <DropdownEmpty>Loading…</DropdownEmpty>}
-      {!loading && agents.length === 0 && <DropdownEmpty>No installed agents</DropdownEmpty>}
-      {agents.map((agent) => (
+      {!loading && enabledShells.length === 0 && <DropdownEmpty>No shells detected</DropdownEmpty>}
+      {enabledShells.map((shell) => (
         <DropdownItem
-          key={agent.id}
-          icon={<Bot size={14} />}
-          disabled={!agent.installed}
-          onClick={() => addTab("agent", { title: agent.name, agentId: agent.id })}
+          key={shell.id}
+          icon={<TerminalSquare size={14} />}
+          onClick={() => void openTab("shell", shell.id, shell.name)}
         >
-          {agent.name}
+          {shell.name}
         </DropdownItem>
       ))}
 
       <DropdownSeparator />
 
-      <DropdownLabel>Tools</DropdownLabel>
-      <DropdownItem icon={<TerminalSquare size={14} />} onClick={() => addTab("terminal")}>
-        Terminal
-      </DropdownItem>
-      <DropdownItem icon={<FolderTree size={14} />} onClick={() => addTab("files")}>
-        File Explorer
-      </DropdownItem>
+      <DropdownLabel>Agents</DropdownLabel>
+      {!loading && agents.length === 0 && <DropdownEmpty>No agents</DropdownEmpty>}
+      {agents.map((agent) =>
+        agent.enabled ? (
+          <DropdownItem
+            key={agent.id}
+            icon={<Bot size={14} />}
+            onClick={() => void openTab("agent", agent.id, agent.name)}
+          >
+            {agent.name}
+          </DropdownItem>
+        ) : (
+          <DropdownItem
+            key={agent.id}
+            icon={<Download size={14} />}
+            keepOpen
+            disabled={!agent.installCmd}
+            onClick={() => {
+              void api.installRegistryEntry(agent.id).then(() => reload());
+            }}
+          >
+            <span className="text-neutral-500">{agent.name}</span>
+            <span className="ml-1 text-[10px] text-neutral-600">install</span>
+          </DropdownItem>
+        )
+      )}
     </Dropdown>
   );
 };
