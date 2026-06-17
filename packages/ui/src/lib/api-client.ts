@@ -5,6 +5,7 @@ import type {
   CreateWorkspaceRequest,
   EventMessage,
   HealthResponse,
+  OpenResult,
   OpenTargetSummary,
   ProjectSummary,
   RegistryActionResult,
@@ -39,7 +40,7 @@ export class ApiClient {
   constructor(
     public readonly connection: UiConnection,
     private readonly transporter: Transporter
-  ) {}
+  ) { }
 
   get transportKind(): string {
     return this.transporter.kind;
@@ -87,7 +88,7 @@ export class ApiClient {
     return () => handle.close();
   }
 
-  // --- Daemon meta ---------------------------------------------------------
+  // Daemon meta
 
   health(signal?: AbortSignal): Promise<HealthResponse> {
     return this.send("GET", "/health", { signal });
@@ -97,7 +98,7 @@ export class ApiClient {
     return this.send("GET", "/api/info", { signal });
   }
 
-  // --- Workspaces & projects (filesystem-backed) ---------------------------
+  // Workspaces & projects (filesystem-backed)
 
   listWorkspaces(signal?: AbortSignal): Promise<WorkspaceSummary[]> {
     return this.send("GET", "/api/workspaces", { signal });
@@ -122,7 +123,7 @@ export class ApiClient {
     });
   }
 
-  // --- Catalog (agents / open targets) -------------------------------------
+  // Catalog (agents / open targets)
 
   listAgents(signal?: AbortSignal): Promise<AgentSummary[]> {
     return this.send("GET", "/api/agents", { signal });
@@ -132,7 +133,7 @@ export class ApiClient {
     return this.send("GET", "/api/open-targets", { signal });
   }
 
-  // --- Registry (shells & agents) ------------------------------------------
+  // Registry (shells & agents)
 
   listRegistry(signal?: AbortSignal): Promise<RegistryResponse> {
     return this.send("GET", "/api/registry", { signal });
@@ -150,7 +151,12 @@ export class ApiClient {
     return this.send("GET", `/api/registry/${encodeURIComponent(id)}/version`);
   }
 
-  // --- Sessions (PTYs) -----------------------------------------------------
+  /** Launch an ide/file-explorer/browser target on a path. */
+  open(targetId: string, path: string): Promise<OpenResult> {
+    return this.send("POST", "/api/open", { body: { targetId, path } });
+  }
+
+  // Sessions (PTYs)
 
   listSessions(projectPath?: string, signal?: AbortSignal): Promise<SessionSummary[]> {
     return this.send("GET", "/api/sessions", {

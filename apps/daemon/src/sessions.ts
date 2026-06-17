@@ -46,7 +46,7 @@ export class SessionManager {
       cwd,
       cols,
       rows,
-      env: { ...process.env, TERM: "xterm-256color" }
+      env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" }
     });
 
     const summary: SessionSummary = {

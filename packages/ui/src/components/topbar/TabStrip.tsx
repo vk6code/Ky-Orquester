@@ -4,7 +4,7 @@ import { cn } from "../../lib/cn";
 import { useActiveSessionId, useAppStore, useProjectSessions } from "../../store/app";
 import type { RegistryKind } from "../../types";
 
-const KIND_ICONS: Record<RegistryKind, React.ReactNode> = {
+const KIND_ICONS: Partial<Record<RegistryKind, React.ReactNode>> = {
   shell: <TerminalSquare size={13} />,
   agent: <Bot size={13} />
 };

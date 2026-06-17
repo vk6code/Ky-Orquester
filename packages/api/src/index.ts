@@ -75,17 +75,21 @@ export interface OpenTargetSummary {
   available: boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Registry — shells & agents share the same shape.
-// ---------------------------------------------------------------------------
 
-export type RegistryKind = "shell" | "agent";
+export type RegistryKind = "shell" | "agent" | "ide" | "file-explorer" | "browser";
+
+/** Kinds that launch a persistent PTY session. */
+export type SessionKind = Extract<RegistryKind, "shell" | "agent">;
+
+/** Kinds the "Open in…" menu can launch (fire-and-forget, with a path). */
+export type OpenKind = Extract<RegistryKind, "ide" | "file-explorer" | "browser">;
 
 export interface RegistryEntry {
   id: string;
   name: string;
   kind: RegistryKind;
-  /** Candidate binaries; the first found in PATH wins (cached by the daemon). */
+  /** Candidate binaries (names and/or absolute install paths); first found wins (cached). */
   bin: string[];
   /** True only when a candidate bin resolved AND the entry is not disabled. */
   enabled: boolean;
@@ -102,6 +106,9 @@ export interface RegistryEntry {
 export interface RegistryResponse {
   shells: RegistryEntry[];
   agents: RegistryEntry[];
+  ides: RegistryEntry[];
+  fileExplorers: RegistryEntry[];
+  browsers: RegistryEntry[];
 }
 
 export interface RegistryActionResult {
@@ -110,10 +117,20 @@ export interface RegistryActionResult {
   output: string;
 }
 
-// ---------------------------------------------------------------------------
+export interface OpenRequest {
+  /** Registry entry id of an ide/file-explorer/browser target. */
+  targetId: string;
+  /** Absolute path to open (a project folder). */
+  path: string;
+}
+
+export interface OpenResult {
+  ok: boolean;
+  message?: string;
+}
+
 // Sessions — a live PTY (shell or agent) owned by the daemon. Open sessions
 // for a project are that project's tabs; they outlive client disconnects.
-// ---------------------------------------------------------------------------
 
 export type SessionStatus = "running" | "exited";
 

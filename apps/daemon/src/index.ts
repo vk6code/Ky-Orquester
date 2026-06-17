@@ -4,6 +4,8 @@ import type {
   CreateWorkspaceRequest,
   EventMessage,
   HealthResponse,
+  OpenRequest,
+  OpenResult,
   ProjectSummary,
   RegistryResponse,
   ServerInfoResponse,
@@ -228,7 +230,7 @@ function createServer(
     }
   );
 
-  // --- Registry (shells & agents) ------------------------------------------
+  // Registry (shells & agents)
   app.get("/api/registry", async (): Promise<RegistryResponse> => registry.list());
 
   app.get<{ Params: { id: string } }>("/api/registry/:id/version", async (request) =>
@@ -243,7 +245,16 @@ function createServer(
     registry.update(request.params.id)
   );
 
-  // --- Sessions (PTYs) -----------------------------------------------------
+  // Launch an ide/file-explorer/browser on a path (fire-and-forget).
+  app.post("/api/open", async (request, reply): Promise<OpenResult | void> => {
+    const body = (request.body ?? {}) as OpenRequest;
+    if (!body.targetId || !body.path) {
+      return reply.code(400).send({ code: "INVALID_REQUEST", message: "targetId and path required." });
+    }
+    return registry.openTarget(body.targetId, body.path);
+  });
+
+  // Sessions (PTYs)
   app.get<{ Querystring: { projectPath?: string } }>(
     "/api/sessions",
     async (request): Promise<SessionSummary[]> => sessions.list(request.query.projectPath)

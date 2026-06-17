@@ -21,7 +21,6 @@ export function joinPath(...segments: string[]): string {
   ].join("/");
 }
 
-// ---------------------------------------------------------------------------
 // Variable expansion
 //
 // Config string values (paths) may reference:
@@ -29,7 +28,6 @@ export function joinPath(...segments: string[]): string {
 //   $user      the OS username
 //   $cwd       the process working directory
 //   $appdir    the resolved base config dir (~/.orquester or e.g. ./.stage)
-// ---------------------------------------------------------------------------
 
 export interface ConfigVars {
   user: string;
@@ -48,7 +46,6 @@ export function expandVars(value: string, vars: ConfigVars): string {
     .replaceAll("$user", vars.user);
 }
 
-// ---------------------------------------------------------------------------
 // Directory layout
 //
 //   <appdir>/                 (~/.orquester by default, or e.g. ./.stage)
@@ -57,7 +54,6 @@ export function expandVars(value: string, vars: ConfigVars): string {
 //
 // Workspaces live wherever daemon.json `workspacesDir` points (default
 // `$userhome/workspaces`; the stage sandbox uses `$appdir/workspaces`).
-// ---------------------------------------------------------------------------
 
 /** Resolve the base config dir. `appdir` (if given) must already be absolute. */
 export function resolveBaseDir(homeDir: string, appdir?: string): string {
@@ -112,9 +108,7 @@ export function dailyLogFile(logsDir: string, date = new Date()): string {
   return joinPath(logsDir, `${localDateStamp(date)}.log`);
 }
 
-// ---------------------------------------------------------------------------
 // daemon.json
-// ---------------------------------------------------------------------------
 
 export const httpTransportSchema = z.object({
   enabled: z.boolean().default(false),
@@ -201,9 +195,7 @@ function lastSegment(path: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
-// ---------------------------------------------------------------------------
 // Connections
-// ---------------------------------------------------------------------------
 
 export const localConnectionSchema = z.object({
   id: z.string().min(1),
@@ -227,9 +219,7 @@ export function createLocalConnection(socketPath: string): LocalConnectionConfig
   return { id: LOCAL_CONNECTION_ID, name: "Local daemon", kind: "local", socketPath };
 }
 
-// ---------------------------------------------------------------------------
 // app.json (desktop app config)
-// ---------------------------------------------------------------------------
 
 export const appConfigSchema = z.object({
   version: z.literal(1).default(1),
@@ -249,9 +239,7 @@ export function parseAppConfig(value: unknown): AppConfig {
   return appConfigSchema.parse(value);
 }
 
-// ---------------------------------------------------------------------------
 // remotes.json (user-added remote servers; local is implicit)
-// ---------------------------------------------------------------------------
 
 export const remotesConfigSchema = z.object({
   version: z.literal(1).default(1),
@@ -268,9 +256,7 @@ export function parseRemotesConfig(value: unknown): RemotesConfig {
   return remotesConfigSchema.parse(value);
 }
 
-// ---------------------------------------------------------------------------
-// ClientConfig — what the daemon reports about how to reach itself.
-// ---------------------------------------------------------------------------
+// ClientConfig — what the daemon reports about how to reach itself.}
 
 export const clientConfigSchema = z.object({
   version: z.literal(1).default(1),

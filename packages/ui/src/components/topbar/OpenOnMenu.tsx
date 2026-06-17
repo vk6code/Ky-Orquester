@@ -1,23 +1,41 @@
 import React from "react";
-import { ChevronDown, ExternalLink, FolderOpen } from "lucide-react";
+import { ChevronDown, Code2, ExternalLink, FolderOpen, Globe } from "lucide-react";
 import { Dropdown, DropdownEmpty, DropdownItem, DropdownLabel, DropdownSeparator } from "../ui";
-import { useOpenTargets } from "../../hooks";
-import type { OpenTargetSummary } from "../../types";
+import { useRegistry } from "../../hooks";
+import { useApi } from "../../context/orquester-context";
+import { useAppStore } from "../../store/app";
+import type { RegistryEntry } from "../../types";
 
 /**
- * "Open on ▾" — launch the current project folder in an IDE or the OS file
- * explorer. Skeleton: selecting a target is a no-op placeholder (the daemon
- * launch endpoint is not wired yet).
+ * "Open on ▾" — launch the current project folder in a detected IDE, file
+ * explorer or browser (real daemon registry). Falls back to the OS default
+ * ("Open Directory" / "Default Browser") entries the daemon always provides.
  */
 export const OpenOnMenu: React.FC = () => {
-  const { data: targets, loading } = useOpenTargets();
+  const api = useApi();
+  const currentProject = useAppStore((s) => s.currentProject);
+  const { data: registry, loading } = useRegistry();
 
-  const ides = targets.filter((t) => t.kind === "ide");
-  const tools = targets.filter((t) => t.kind !== "ide");
+  const open = (target: RegistryEntry) => {
+    if (currentProject) {
+      void api.open(target.id, currentProject.path);
+    }
+  };
 
-  // TODO: call system service to actually launch the target via the daemon.
-  const open = (target: OpenTargetSummary) => {
-    console.info(`[orquester] open project on "${target.id}" (not yet implemented)`);
+  const section = (label: string, icon: React.ReactNode, entries: RegistryEntry[], emptyText: string) => {
+    const available = entries.filter((e) => e.enabled);
+    return (
+      <>
+        <DropdownLabel>{label}</DropdownLabel>
+        {loading && <DropdownEmpty>Loading…</DropdownEmpty>}
+        {!loading && available.length === 0 && <DropdownEmpty>{emptyText}</DropdownEmpty>}
+        {available.map((entry) => (
+          <DropdownItem key={entry.id} icon={icon} onClick={() => open(entry)}>
+            {entry.name}
+          </DropdownItem>
+        ))}
+      </>
+    );
   };
 
   const trigger = (
@@ -29,36 +47,12 @@ export const OpenOnMenu: React.FC = () => {
   );
 
   return (
-    <Dropdown trigger={trigger} align="right" width="w-52">
-      <DropdownLabel>Editors</DropdownLabel>
-      {loading && <DropdownEmpty>Loading…</DropdownEmpty>}
-      {!loading && ides.length === 0 && <DropdownEmpty>No editors detected</DropdownEmpty>}
-      {ides.map((target) => (
-        <DropdownItem
-          key={target.id}
-          icon={<ExternalLink size={14} />}
-          disabled={!target.available}
-          onClick={() => open(target)}
-        >
-          {target.name}
-        </DropdownItem>
-      ))}
-
-      {tools.length > 0 && (
-        <>
-          <DropdownSeparator />
-          {tools.map((target) => (
-            <DropdownItem
-              key={target.id}
-              icon={<FolderOpen size={14} />}
-              disabled={!target.available}
-              onClick={() => open(target)}
-            >
-              {target.name}
-            </DropdownItem>
-          ))}
-        </>
-      )}
+    <Dropdown trigger={trigger} align="right" width="w-56">
+      {section("Editors", <Code2 size={14} />, registry.ides, "No editors detected")}
+      <DropdownSeparator />
+      {section("File explorers", <FolderOpen size={14} />, registry.fileExplorers, "Unavailable")}
+      <DropdownSeparator />
+      {section("Browsers", <Globe size={14} />, registry.browsers, "No browsers detected")}
     </Dropdown>
   );
 };
