@@ -1,20 +1,23 @@
 import React, { useEffect, useState } from "react";
-import { AppWindow, ChevronLeft, ChevronRight, Server } from "lucide-react";
+import { AppWindow, Boxes, ChevronLeft, ChevronRight, Download, Loader2, RefreshCw, Server } from "lucide-react";
 import type { DaemonConfig } from "@orquester/config";
 import { cn } from "../../lib/cn";
 import { Button, Input, Modal, ModalCloseButton, Switch } from "../ui";
-import { useIsDesktop } from "../../hooks";
+import { getRegistryIcon } from "../../icons";
+import { useIsDesktop, useRegistry } from "../../hooks";
 import { useApi, useOrquester } from "../../context/orquester-context";
 import { useAppStore } from "../../store/app";
 
-type Section = "app" | "daemon";
+type Section = "app" | "agents" | "daemon";
 
 const SECTIONS: { id: Section; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "app", label: "App", icon: <AppWindow size={16} />, desc: "Titlebar, runtime, active server" },
+  { id: "agents", label: "Agents", icon: <Boxes size={16} />, desc: "Install, update and view harness versions" },
   { id: "daemon", label: "Daemon", icon: <Server size={16} />, desc: "Workspaces dir, external HTTP access" }
 ];
 
-const renderSection = (id: Section) => (id === "app" ? <AppSettings /> : <DaemonSettings />);
+const renderSection = (id: Section) =>
+  id === "app" ? <AppSettings /> : id === "agents" ? <AgentsSettings /> : <DaemonSettings />;
 const labelOf = (id: Section) => SECTIONS.find((s) => s.id === id)?.label ?? "";
 
 export const SettingsModal: React.FC = () => {
@@ -133,6 +136,103 @@ const Field: React.FC<{ label: string; hint?: string; children: React.ReactNode 
     <div className="shrink-0">{children}</div>
   </div>
 );
+
+type AgentFilter = "all" | "installed" | "available";
+
+const AgentsSettings: React.FC = () => {
+  const registry = useRegistry();
+  const installAgent = useAppStore((s) => s.installAgent);
+  const updateAgent = useAppStore((s) => s.updateAgent);
+  const [filter, setFilter] = useState<AgentFilter>("all");
+
+  const agents = registry.agents.filter((a) =>
+    filter === "installed" ? a.enabled : filter === "available" ? !a.enabled : true
+  );
+
+  const filters: { id: AgentFilter; label: string }[] = [
+    { id: "all", label: "All" },
+    { id: "installed", label: "Installed" },
+    { id: "available", label: "Available" }
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div className="inline-flex rounded-lg bg-neutral-800/60 p-0.5 text-xs">
+        {filters.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => setFilter(f.id)}
+            className={cn(
+              "rounded-md px-3 py-1 transition-colors",
+              filter === f.id ? "bg-neutral-700 text-neutral-100" : "text-neutral-400 hover:text-neutral-200"
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="divide-y divide-neutral-800 rounded-lg border border-neutral-800">
+        {agents.length === 0 && (
+          <p className="px-3 py-4 text-sm text-neutral-600">No agents in this view.</p>
+        )}
+        {agents.map((agent) => {
+          const busy = agent.installState === "installing";
+          const failed = agent.installState === "error";
+          return (
+            <div key={agent.id} className="flex items-center gap-3 px-3 py-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center text-neutral-400">
+                {getRegistryIcon("agent", agent.id, 18)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-neutral-100">{agent.name}</p>
+                <p className="truncate text-xs text-neutral-500">
+                  {busy
+                    ? agent.enabled
+                      ? "Updating…"
+                      : "Installing…"
+                    : failed
+                      ? `Failed${agent.installError ? `: ${firstLine(agent.installError)}` : ""}`
+                      : agent.enabled
+                        ? agent.version ?? "installed"
+                        : "Not installed"}
+                </p>
+              </div>
+              <div className="shrink-0">
+                {busy ? (
+                  <span className="flex items-center gap-1.5 text-xs text-neutral-400">
+                    <Loader2 size={13} className="animate-spin" />
+                    {agent.enabled ? "Updating…" : "Installing…"}
+                  </span>
+                ) : failed ? (
+                  <Button size="sm" variant="outline" onClick={() => void installAgent(agent.id)}>
+                    <RefreshCw size={13} /> Retry
+                  </Button>
+                ) : agent.enabled ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!agent.updateCmd}
+                    onClick={() => void updateAgent(agent.id)}
+                  >
+                    <RefreshCw size={13} /> Update
+                  </Button>
+                ) : (
+                  <Button size="sm" disabled={!agent.installCmd} onClick={() => void installAgent(agent.id)}>
+                    <Download size={13} /> Install
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const firstLine = (text: string) => text.split("\n").find((l) => l.trim())?.trim().slice(0, 80) ?? "";
 
 const AppSettings: React.FC = () => {
   const { runtime } = useOrquester();

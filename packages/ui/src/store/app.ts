@@ -12,13 +12,40 @@ import type {
   ConnectionStatus,
   EventMessage,
   ProjectSummary,
+  RegistryEntry,
   RegistryKind,
+  RegistryResponse,
   SessionSummary,
   UiConnection,
   WorkspaceSummary
 } from "../types";
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+const EMPTY_REGISTRY: RegistryResponse = {
+  shells: [],
+  agents: [],
+  ides: [],
+  fileExplorers: [],
+  browsers: []
+};
+
+/** Replace a registry entry (matched by id within its kind) with a fresh copy. */
+function applyRegistryEntry(registry: RegistryResponse, entry: RegistryEntry): RegistryResponse {
+  const key = (
+    {
+      shell: "shells",
+      agent: "agents",
+      ide: "ides",
+      "file-explorer": "fileExplorers",
+      browser: "browsers"
+    } as const
+  )[entry.kind];
+  const list = registry[key];
+  const index = list.findIndex((e) => e.id === entry.id);
+  const next = index === -1 ? [...list, entry] : list.map((e) => (e.id === entry.id ? entry : e));
+  return { ...registry, [key]: next };
+}
 
 /** Module-level handle so we can drop the events subscription on reconnect. */
 let eventsUnsubscribe: (() => void) | null = null;
@@ -143,6 +170,7 @@ export interface AppState {
   currentProject: ProjectSummary | null;
 
   // data
+  registry: RegistryResponse;
   workspaces: WorkspaceSummary[];
   workspacesLoading: boolean;
   projects: ProjectSummary[];
@@ -190,6 +218,9 @@ export interface AppState {
   openProject: (project: ProjectSummary) => void;
 
   loadSessions: () => Promise<void>;
+  loadRegistry: () => Promise<void>;
+  installAgent: (id: string) => Promise<void>;
+  updateAgent: (id: string) => Promise<void>;
   openTab: (kind: RegistryKind, refId: string, title?: string) => Promise<void>;
   openFileBrowser: () => void;
   closeTab: (id: string) => Promise<void>;
@@ -212,6 +243,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   authSalt: null,
   currentWorkspace: null,
   currentProject: null,
+  registry: EMPTY_REGISTRY,
   workspaces: [],
   workspacesLoading: false,
   projects: [],
@@ -271,7 +303,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     set({ connectionStatus: "connected", reconnectAttempt: 0, authPrompt: null });
-    await Promise.all([get().loadWorkspaces(), get().loadSessions()]);
+    await Promise.all([get().loadWorkspaces(), get().loadSessions(), get().loadRegistry()]);
 
     // Live event sync. The stream ending unexpectedly (e.g. the transport was
     // restarted) is the primary disconnect signal.
@@ -555,6 +587,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  loadRegistry: async () => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    try {
+      set({ registry: await api.listRegistry() });
+    } catch {
+      /* keep current */
+    }
+  },
+
+  installAgent: async (id) => {
+    // Status (installing/installed/error) arrives via the "registry" event bus.
+    await get().api?.installRegistryEntry(id).catch(() => undefined);
+  },
+
+  updateAgent: async (id) => {
+    await get().api?.updateRegistryEntry(id).catch(() => undefined);
+  },
+
   openTab: async (kind, refId, title) => {
     const api = get().api;
     if (!api) {
@@ -611,6 +664,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
 
   applyEvent: (event) => {
+    if (event.channel === "registry" && event.type === "registry.changed") {
+      const entry = event.payload as RegistryEntry;
+      set((state) => ({ registry: applyRegistryEntry(state.registry, entry) }));
+      return;
+    }
     if (event.channel !== "sessions") {
       return;
     }

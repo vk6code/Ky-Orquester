@@ -100,9 +100,11 @@ async function main(): Promise<void> {
   // Shared, transport-agnostic services. Sessions live here so they survive
   // client disconnects and are visible across every transport/client.
   const registry = new RegistryService(resolved.daemonDir);
-  await registry.init();
   const sessions = new SessionManager(registry);
   const broadcaster = new Broadcaster();
+  // Stream registry changes (install/update status, detected versions) to clients.
+  registry.events.on("changed", (entry) => broadcaster.publish("registry", "registry.changed", entry));
+  await registry.init();
   sessions.lifecycle.on("created", (s: SessionSummary) =>
     broadcaster.publish("sessions", "session.created", s)
   );

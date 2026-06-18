@@ -125,6 +125,9 @@ export type SessionKind = Extract<RegistryKind, "shell" | "agent">;
 /** Kinds the "Open in…" menu can launch (fire-and-forget, with a path). */
 export type OpenKind = Extract<RegistryKind, "ide" | "file-explorer" | "browser">;
 
+/** Lifecycle of a daemon-managed install/update for an agent. */
+export type RegistryInstallState = "idle" | "installing" | "error";
+
 export interface RegistryEntry {
   id: string;
   name: string;
@@ -137,10 +140,16 @@ export interface RegistryEntry {
   resolvedBin?: string;
   /** Flag to print a version (agents only), e.g. "--version". */
   versionFlag?: string;
+  /** Installed version, detected by running the version flag at startup (cached). */
+  version?: string;
   /** Shell command to install the bin (agents only). */
   installCmd?: string;
   /** Shell command to update the bin (agents only). */
   updateCmd?: string;
+  /** Live install/update status (daemon-managed, streamed over events). */
+  installState: RegistryInstallState;
+  /** Captured output when `installState === "error"`. */
+  installError?: string;
 }
 
 export interface RegistryResponse {

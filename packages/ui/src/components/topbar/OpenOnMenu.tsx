@@ -15,7 +15,7 @@ import type { RegistryEntry } from "../../types";
 export const OpenOnMenu: React.FC = () => {
   const api = useApi();
   const currentProject = useAppStore((s) => s.currentProject);
-  const { data: registry, loading } = useRegistry();
+  const registry = useRegistry();
 
   const open = (target: RegistryEntry) => {
     if (currentProject) {
@@ -28,8 +28,7 @@ export const OpenOnMenu: React.FC = () => {
     return (
       <>
         <DropdownLabel>{label}</DropdownLabel>
-        {loading && <DropdownEmpty>Loading…</DropdownEmpty>}
-        {!loading && available.length === 0 && <DropdownEmpty>{emptyText}</DropdownEmpty>}
+        {available.length === 0 && <DropdownEmpty>{emptyText}</DropdownEmpty>}
         {available.map((entry) => (
           <DropdownItem key={entry.id} icon={getRegistryIcon(kind, entry.id, 14)} onClick={() => open(entry)}>
             {entry.name}

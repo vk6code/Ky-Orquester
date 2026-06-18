@@ -7,6 +7,7 @@ import type {
 } from "@orquester/api";
 import { REGISTRY, type RegistryEntryDef } from "@orquester/registry";
 import { exec, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { accessSync, constants } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
@@ -102,6 +103,8 @@ function osOpenerForKind(kind: RegistryKind): string[] {
  */
 export class RegistryService {
   private entries = new Map<string, RegistryEntry>();
+  /** Emits "changed" with the updated RegistryEntry (broadcast to clients). */
+  readonly events = new EventEmitter();
 
   constructor(private readonly daemonDir: string) {}
 
@@ -123,6 +126,9 @@ export class RegistryService {
     for (const def of defs) {
       this.entries.set(def.id, this.resolveDef(def));
     }
+    // Detect installed agent versions in the background (cached); each result
+    // patches the entry and emits "changed".
+    void this.detectVersions();
   }
 
   list(): RegistryResponse {
@@ -158,6 +164,27 @@ export class RegistryService {
     }
   }
 
+  /** Start an install (background); status flows via `events`. Returns immediately. */
+  install(id: string): { started: boolean } {
+    const entry = this.entries.get(id);
+    if (!entry?.installCmd || entry.installState === "installing") {
+      return { started: false };
+    }
+    this.runManaged(id, entry.installCmd);
+    return { started: true };
+  }
+
+  /** Start an update (background); same semantics as install. */
+  update(id: string): { started: boolean } {
+    const entry = this.entries.get(id);
+    if (!entry?.updateCmd || entry.installState === "installing") {
+      return { started: false };
+    }
+    this.runManaged(id, entry.updateCmd);
+    return { started: true };
+  }
+
+  /** Run the live version flag for an entry (manual endpoint). */
   async version(id: string): Promise<RegistryActionResult> {
     const entry = this.entries.get(id);
     if (!entry?.resolvedBin || !entry.versionFlag) {
@@ -166,22 +193,54 @@ export class RegistryService {
     return run(`"${entry.resolvedBin}" ${entry.versionFlag}`);
   }
 
-  async install(id: string): Promise<RegistryActionResult> {
-    const entry = this.entries.get(id);
-    if (!entry?.installCmd) {
-      return { ok: false, exitCode: -1, output: "No install command for this entry." };
-    }
-    const result = await run(entry.installCmd);
-    await this.init();
-    return result;
+  /** Run an install/update command, broadcasting status; re-resolve on success. */
+  private runManaged(id: string, command: string): void {
+    this.patch(id, { installState: "installing", installError: undefined });
+    void run(command).then((result) => {
+      if (result.ok) {
+        const entry = this.entries.get(id);
+        const resolvedBin = entry ? resolveBin(entry.bin) : undefined;
+        this.patch(id, {
+          resolvedBin,
+          enabled: Boolean(resolvedBin),
+          installState: "idle",
+          installError: undefined,
+          version: undefined
+        });
+        void this.detectVersion(id);
+      } else {
+        this.patch(id, { installState: "error", installError: result.output.slice(-4000) });
+      }
+    });
   }
 
-  async update(id: string): Promise<RegistryActionResult> {
+  private patch(id: string, partial: Partial<RegistryEntry>): void {
     const entry = this.entries.get(id);
-    if (!entry?.updateCmd) {
-      return { ok: false, exitCode: -1, output: "No update command for this entry." };
+    if (!entry) {
+      return;
     }
-    return run(entry.updateCmd);
+    Object.assign(entry, partial);
+    this.events.emit("changed", { ...entry });
+  }
+
+  private async detectVersions(): Promise<void> {
+    await Promise.all(
+      [...this.entries.values()]
+        .filter((e) => e.kind === "agent" && e.enabled && e.versionFlag)
+        .map((e) => this.detectVersion(e.id))
+    );
+  }
+
+  private async detectVersion(id: string): Promise<void> {
+    const entry = this.entries.get(id);
+    if (!entry?.resolvedBin || !entry.versionFlag) {
+      return;
+    }
+    const result = await run(`"${entry.resolvedBin}" ${entry.versionFlag}`);
+    if (result.ok) {
+      const version = result.output.split("\n").find((l) => l.trim())?.trim().slice(0, 80);
+      this.patch(id, { version });
+    }
   }
 
   private resolveDef(def: RegistryDef): RegistryEntry {
@@ -195,7 +254,8 @@ export class RegistryService {
       enabled: Boolean(resolvedBin) && def.enabled !== false,
       versionFlag: def.versionFlag,
       installCmd: def.installCmd,
-      updateCmd: def.updateCmd
+      updateCmd: def.updateCmd,
+      installState: "idle"
     };
   }
 
