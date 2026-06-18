@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Check, ChevronDown } from "lucide-react";
-import { Dropdown, DropdownEmpty, DropdownItem, DropdownLabel } from "../ui";
+import { AdaptiveMenu, DropdownEmpty, DropdownItem, DropdownLabel } from "../ui";
 import { useAppStore } from "../../store/app";
 
 /** Titlebar dropdown showing the active project and switching between siblings. */
@@ -20,7 +20,7 @@ export const ProjectSwitcher: React.FC = () => {
   );
 
   return (
-    <Dropdown trigger={trigger} width="w-64">
+    <AdaptiveMenu title="Projects" trigger={trigger} width="w-64">
       <DropdownLabel>{currentProject?.workspace ?? currentWorkspace ?? "Workspace"}</DropdownLabel>
       {projectsLoading && <DropdownEmpty>Loading…</DropdownEmpty>}
       {!projectsLoading && projects.length === 0 && <DropdownEmpty>No projects</DropdownEmpty>}
@@ -33,6 +33,6 @@ export const ProjectSwitcher: React.FC = () => {
           {project.name}
         </DropdownItem>
       ))}
-    </Dropdown>
+    </AdaptiveMenu>
   );
 };

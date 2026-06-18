@@ -108,6 +108,8 @@ export interface AppState {
   appConfig: UiAppConfig;
   settingsOpen: boolean;
   sidebarCollapsed: boolean;
+  /** Mobile off-canvas sidebar drawer. */
+  sidebarDrawerOpen: boolean;
 
   // auth (web → password-protected HTTP daemon)
   authPrompt: { connectionId: string } | null;
@@ -144,6 +146,7 @@ export interface AppState {
   loadAppConfig: () => Promise<void>;
   setSettingsOpen: (open: boolean) => void;
   toggleSidebar: () => void;
+  setSidebarDrawer: (open: boolean) => void;
   updateAppConfig: (patch: Partial<UiAppConfig>) => Promise<void>;
 
   // auth
@@ -176,6 +179,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   appConfig: { useTitlebar: false },
   settingsOpen: false,
   sidebarCollapsed: false,
+  sidebarDrawerOpen: false,
   authPrompt: null,
   authSalt: null,
   currentWorkspace: null,
@@ -281,6 +285,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSettingsOpen: (open) => set({ settingsOpen: open }),
 
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+  setSidebarDrawer: (open) => set({ sidebarDrawerOpen: open }),
 
   updateAppConfig: async (patch) => {
     const appConfig = { ...get().appConfig, ...patch };
@@ -431,6 +437,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       const fallback = firstTabId(state.sessions, state.fileTabsByProject, project.path);
       return {
         currentProject: project,
+        // Opening a project reveals the main view — close the mobile drawer.
+        sidebarDrawerOpen: false,
         activeTabByProject: {
           ...state.activeTabByProject,
           [project.path]: active ?? fallback

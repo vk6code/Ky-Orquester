@@ -27,7 +27,7 @@ export const Modal: React.FC<ModalProps> = ({ open, onClose, children, className
 
   return createPortal(
     <div
-      className="app-no-drag fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-6"
+      className="app-no-drag fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-3 sm:p-6"
       onMouseDown={onClose}
     >
       <div
@@ -35,7 +35,7 @@ export const Modal: React.FC<ModalProps> = ({ open, onClose, children, className
         aria-modal="true"
         onMouseDown={(e) => e.stopPropagation()}
         className={cn(
-          "flex max-h-[80vh] w-full max-w-3xl overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 shadow-2xl",
+          "flex max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 shadow-2xl",
           className
         )}
       >

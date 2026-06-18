@@ -4,6 +4,7 @@ import { TopBar } from "../topbar";
 import { MainView } from "../main";
 import { SettingsModal } from "../settings";
 import { AuthModal } from "../auth";
+import { MobileKeyBar } from "../terminal";
 
 /**
  * Primary layout: full-height sidebar on the left, and a main column whose top
@@ -15,6 +16,7 @@ export const AppShell: React.FC = () => (
     <div className="flex min-w-0 flex-1 flex-col">
       <TopBar />
       <MainView />
+      <MobileKeyBar />
     </div>
     <SettingsModal />
     <AuthModal />

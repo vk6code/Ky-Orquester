@@ -1,7 +1,7 @@
 import React from "react";
 import { Download, FolderTree, Plus } from "lucide-react";
 import {
-  Dropdown,
+  AdaptiveMenu,
   DropdownEmpty,
   DropdownItem,
   DropdownLabel,
@@ -28,7 +28,8 @@ export const NewTabMenu: React.FC = () => {
   const agents = registry.agents;
 
   return (
-    <Dropdown
+    <AdaptiveMenu
+      title="New tab"
       trigger={
         <IconButton label="New tab" className="app-no-drag">
           <Plus size={16} />
@@ -84,6 +85,6 @@ export const NewTabMenu: React.FC = () => {
           </DropdownItem>
         )
       )}
-    </Dropdown>
+    </AdaptiveMenu>
   );
 };

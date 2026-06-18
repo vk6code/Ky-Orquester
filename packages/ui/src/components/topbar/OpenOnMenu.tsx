@@ -1,6 +1,6 @@
 import React from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
-import { Dropdown, DropdownEmpty, DropdownItem, DropdownLabel, DropdownSeparator } from "../ui";
+import { AdaptiveMenu, DropdownEmpty, DropdownItem, DropdownLabel, DropdownSeparator } from "../ui";
 import { getRegistryIcon } from "../../icons";
 import { useRegistry } from "../../hooks";
 import { useApi } from "../../context/orquester-context";
@@ -42,18 +42,18 @@ export const OpenOnMenu: React.FC = () => {
   const trigger = (
     <span className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800">
       <ExternalLink size={13} className="text-neutral-500" />
-      Open on
+      <span className="hidden sm:inline">Open on</span>
       <ChevronDown size={13} className="text-neutral-500" />
     </span>
   );
 
   return (
-    <Dropdown trigger={trigger} align="right" width="w-56">
+    <AdaptiveMenu title="Open in" trigger={trigger} align="right" width="w-56">
       {section("Editors", "ide", registry.ides, "No editors detected")}
       <DropdownSeparator />
       {section("File explorers", "file-explorer", registry.fileExplorers, "Unavailable")}
       <DropdownSeparator />
       {section("Browsers", "browser", registry.browsers, "No browsers detected")}
-    </Dropdown>
+    </AdaptiveMenu>
   );
 };

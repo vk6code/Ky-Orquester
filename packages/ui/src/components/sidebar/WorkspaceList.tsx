@@ -16,7 +16,7 @@ export const WorkspaceList: React.FC = () => {
   return (
     <>
       <div className="flex h-9 items-center gap-1 px-2">
-        <IconButton label="Collapse sidebar" onClick={toggleSidebar}>
+        <IconButton label="Collapse sidebar" className="hidden md:flex" onClick={toggleSidebar}>
           <PanelLeftClose size={15} />
         </IconButton>
         <span className="flex-1 text-[10px] font-medium uppercase tracking-wider text-neutral-500">

@@ -15,7 +15,10 @@ interface DropdownContextValue {
   close: () => void;
 }
 
-const DropdownContext = React.createContext<DropdownContextValue>({ close: () => undefined });
+/** Shared so menu items work inside both the Dropdown and the mobile BottomSheet. */
+export const DropdownContext = React.createContext<DropdownContextValue>({
+  close: () => undefined
+});
 
 /** Fixed-viewport coordinates for the portaled panel. */
 interface PanelPosition {

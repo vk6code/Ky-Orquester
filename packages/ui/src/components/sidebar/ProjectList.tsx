@@ -20,7 +20,7 @@ export const ProjectList: React.FC = () => {
   return (
     <>
       <div className="flex h-9 items-center gap-0.5 px-2">
-        <IconButton label="Collapse sidebar" onClick={toggleSidebar}>
+        <IconButton label="Collapse sidebar" className="hidden md:flex" onClick={toggleSidebar}>
           <PanelLeftClose size={15} />
         </IconButton>
         <IconButton label="Back to workspaces" onClick={closeWorkspace}>
