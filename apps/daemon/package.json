@@ -13,14 +13,17 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@fastify/static": "^7.0.4",
     "@fastify/websocket": "^10.0.1",
     "@orquester/api": "workspace:*",
     "@orquester/config": "workspace:*",
     "@orquester/registry": "workspace:*",
+    "bcryptjs": "^3.0.3",
     "fastify": "^4.28.1",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
     "@types/node": "^22.15.32",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"

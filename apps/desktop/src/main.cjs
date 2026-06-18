@@ -80,7 +80,10 @@ function startDaemon() {
     env: {
       ...process.env,
       ORQUESTER_UNIX_SOCKET: socketPath,
-      ORQUESTER_HTTP_ENABLED: "false"
+      // The embedded daemon serves this web build when its HTTP transport is
+      // enabled, so the desktop can also expose the browser UI over the LAN.
+      ORQUESTER_WEB_DIR: path.join(repoRoot, "apps", "web", "dist"),
+      ...(process.env.ORQUESTER_HTTP_ENABLED ? {} : { ORQUESTER_HTTP_ENABLED: "false" })
     },
     stdio: "inherit"
   });

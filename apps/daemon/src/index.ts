@@ -43,13 +43,15 @@ import {
   remotesConfigPath,
   resolveDaemonPaths
 } from "@orquester/config";
+import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
-import { createWriteStream, type WriteStream } from "node:fs";
+import { createWriteStream, existsSync, type WriteStream } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { stat } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import bcrypt from "bcryptjs";
 
 const daemonId = randomUUID();
 const packageVersion = "0.0.0";
@@ -132,17 +134,27 @@ async function main(): Promise<void> {
   }
 
   // The external HTTP transport is opt-in (daemon.json -> transports.http.enabled).
+  // It also serves the static web client build (if ORQUESTER_WEB_DIR is set),
+  // so the same daemon exposes both the API (/api, /health, /events) and the
+  // browser UI on one port.
   if (config.transports.http.enabled) {
+    const webDirEnv = process.env.ORQUESTER_WEB_DIR;
+    const webDir = webDirEnv ? resolve(cwd, webDirEnv) : undefined;
+    const serveWeb = webDir && existsSync(join(webDir, "index.html")) ? webDir : undefined;
+
     const app = createServer(config, resolved, clientConfig, logStream, services, {
       authRequired: true,
-      mode: "remote"
+      mode: "remote",
+      serveWeb
     });
     servers.push(app);
     await app.listen({
       host: config.transports.http.host,
       port: config.transports.http.port
     });
-    started.push(`http://${config.transports.http.host}:${config.transports.http.port}`);
+    started.push(
+      `http://${config.transports.http.host}:${config.transports.http.port}${serveWeb ? " (+web)" : ""}`
+    );
   }
 
   process.on("SIGINT", () => shutdown(servers, sessions));
@@ -165,7 +177,7 @@ function createServer(
   clientConfig: ClientConfig,
   logStream: WriteStream,
   services: Services,
-  options: { authRequired: boolean; mode: "local" | "remote" }
+  options: { authRequired: boolean; mode: "local" | "remote"; serveWeb?: string }
 ): FastifyInstance {
   const { registry, sessions } = services;
   // Remote (HTTP) clients are cross-origin (web app / desktop renderer), so the
@@ -189,20 +201,35 @@ function createServer(
       }
     }
 
-    if (!options.authRequired || request.url === "/health") {
+    // Only the API + event stream are token-gated; the static web client, its
+    // assets and the public auth-info endpoint load freely (the web app then
+    // authenticates its API calls with the bcrypt-hash bearer).
+    const url = request.url.split("?")[0];
+    const needsAuth =
+      (url.startsWith("/api") || url.startsWith("/events")) && url !== "/api/auth/info";
+    if (!options.authRequired || !needsAuth) {
       return;
     }
 
-    const expected = config.transports.http.password;
+    const expected = config.transports.http.passwordHash;
     const actual = request.headers.authorization?.replace(/^Bearer\s+/i, "");
 
-    if (!expected || actual !== expected) {
+    if (!expected || !actual || !safeEqual(actual, expected)) {
       return reply.code(401).send({
         code: "UNAUTHORIZED",
         message: "A valid bearer token is required for this daemon transport."
       });
     }
   });
+
+  // Public: tells the web client whether auth is needed and the bcrypt salt to
+  // derive the bearer (the same hash the daemon stores). Never exposes the hash.
+  app.get("/api/auth/info", async () => ({
+    authRequired: options.mode === "remote" && Boolean(config.transports.http.passwordHash),
+    salt: config.transports.http.passwordHash
+      ? config.transports.http.passwordHash.slice(0, 29)
+      : null
+  }));
 
   app.get("/health", async (): Promise<HealthResponse> => ({
     ok: true,
@@ -244,10 +271,12 @@ function createServer(
       port: number;
       password: string;
     }>;
-    const nextPassword =
-      !httpPatch.password || httpPatch.password === "********"
-        ? config.transports.http.password
-        : httpPatch.password;
+    // A new plaintext password (when provided) is hashed; otherwise keep the
+    // existing hash. We never persist plaintext.
+    const passwordHash =
+      httpPatch.password && httpPatch.password !== "********"
+        ? hashPassword(httpPatch.password)
+        : config.transports.http.passwordHash;
 
     let merged: DaemonConfig;
     try {
@@ -255,13 +284,20 @@ function createServer(
         version: 1,
         workspacesDir: body.workspacesDir ?? config.workspacesDir,
         logsDir: body.logsDir ?? config.logsDir,
-        transports: { http: { ...config.transports.http, ...httpPatch, password: nextPassword } }
+        transports: {
+          http: {
+            ...config.transports.http,
+            ...httpPatch,
+            password: undefined,
+            passwordHash
+          }
+        }
       });
     } catch {
       return reply.code(400).send({ code: "INVALID_CONFIG", message: "Invalid daemon config." });
     }
 
-    if (merged.transports.http.enabled && !merged.transports.http.password) {
+    if (merged.transports.http.enabled && !merged.transports.http.passwordHash) {
       return reply.code(400).send({
         code: "PASSWORD_REQUIRED",
         message: "Enabling external HTTP access requires a password (min 8 chars)."
@@ -569,6 +605,21 @@ function createServer(
     });
   });
 
+  // Serve the static web client build for everything outside the API, with an
+  // SPA fallback to index.html. Reserved prefixes stay JSON 404s.
+  if (options.serveWeb) {
+    void app.register(fastifyStatic, { root: options.serveWeb, wildcard: false });
+    app.setNotFoundHandler((request, reply) => {
+      const url = request.url;
+      const isApi =
+        url.startsWith("/api") || url.startsWith("/health") || url.startsWith("/events");
+      if (request.method !== "GET" || isApi) {
+        return reply.code(404).send({ code: "NOT_FOUND", message: "Route not found." });
+      }
+      return reply.sendFile("index.html");
+    });
+  }
+
   return app;
 }
 
@@ -692,39 +743,71 @@ async function writeJsonFile(file: string, value: unknown): Promise<void> {
   await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+/** bcrypt-hash a plaintext password (stable hash persisted at rest). */
+function hashPassword(plaintext: string): string {
+  return bcrypt.hashSync(plaintext, bcrypt.genSaltSync(10));
+}
+
+/** Constant-time string comparison. */
+function safeEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+
+/**
+ * Migrate a legacy/env plaintext `password` into a bcrypt `passwordHash` and
+ * drop the plaintext. Returns true when the config changed (needs persisting).
+ */
+function migrateHttpPassword(config: DaemonConfig): boolean {
+  const http = config.transports.http;
+  if (http.password) {
+    if (!http.passwordHash) {
+      http.passwordHash = hashPassword(http.password);
+    }
+    http.password = undefined;
+    return true;
+  }
+  return false;
+}
+
 async function loadConfig(paths: DaemonPaths): Promise<DaemonConfig> {
   const defaults = createDefaultDaemonConfig({ env: process.env });
+  let config: DaemonConfig;
+  let fileExists = true;
 
   try {
     const raw = await readFile(paths.configPath, "utf8");
     const fromDisk = JSON.parse(raw) as Partial<DaemonConfig>;
-
-    return parseDaemonConfig({
+    config = parseDaemonConfig({
       ...defaults,
       ...fromDisk,
       transports: {
-        http: {
-          ...defaults.transports.http,
-          ...fromDisk.transports?.http
-        }
+        http: { ...defaults.transports.http, ...fromDisk.transports?.http }
       }
     });
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
-      // Persist defaults so the user has a daemon.json to edit.
-      await mkdir(paths.daemonDir, { recursive: true });
-      await writeFile(paths.configPath, `${JSON.stringify(defaults, null, 2)}\n`, "utf8");
-      return defaults;
+      config = defaults;
+      fileExists = false;
+    } else {
+      throw error;
     }
-
-    throw error;
   }
+
+  // Hash any plaintext password and persist so nothing sensitive stays at rest.
+  const changed = migrateHttpPassword(config);
+  if (!fileExists || changed) {
+    await mkdir(paths.daemonDir, { recursive: true });
+    await writeFile(paths.configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  }
+  return config;
 }
 
 function validateTransportConfig(config: DaemonConfig): void {
-  if (config.transports.http.enabled && !config.transports.http.password) {
+  if (config.transports.http.enabled && !config.transports.http.passwordHash) {
     throw new Error(
-      "HTTP transport requires ORQUESTER_HTTP_PASSWORD or transports.http.password in daemon.json."
+      "HTTP transport requires a password (ORQUESTER_HTTP_PASSWORD or transports.http.password in daemon.json)."
     );
   }
 }
@@ -736,13 +819,16 @@ async function prepareDirs(resolved: ResolvedPaths): Promise<void> {
 }
 
 function sanitizeDaemonConfig(config: DaemonConfig): DaemonConfig {
+  // Never expose the hash (it's a bearer-equivalent); the client derives its
+  // own via the public salt at /api/auth/info.
   return {
     ...config,
     transports: {
       ...config.transports,
       http: {
         ...config.transports.http,
-        password: config.transports.http.password ? "********" : undefined
+        password: undefined,
+        passwordHash: config.transports.http.passwordHash ? "********" : undefined
       }
     }
   };

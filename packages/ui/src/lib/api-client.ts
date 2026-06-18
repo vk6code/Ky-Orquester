@@ -1,5 +1,6 @@
 import type {
   AgentSummary,
+  AuthInfoResponse,
   CreateProjectRequest,
   CreateSessionRequest,
   CreateWorkspaceRequest,
@@ -99,6 +100,11 @@ export class ApiClient {
 
   info(signal?: AbortSignal): Promise<ServerInfoResponse> {
     return this.send("GET", "/api/info", { signal });
+  }
+
+  /** Public auth metadata (whether a token is required + bcrypt salt to derive it). */
+  authInfo(signal?: AbortSignal): Promise<AuthInfoResponse> {
+    return this.send("GET", "/api/auth/info", { signal });
   }
 
   getDaemonConfig(signal?: AbortSignal): Promise<DaemonConfig> {

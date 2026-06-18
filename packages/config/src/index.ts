@@ -114,7 +114,10 @@ export const httpTransportSchema = z.object({
   enabled: z.boolean().default(false),
   host: z.string().min(1).default(DEFAULT_HTTP_HOST),
   port: z.coerce.number().int().min(1).max(65535).default(DEFAULT_HTTP_PORT),
-  password: z.string().min(8).optional()
+  /** Transient plaintext input (env / settings). Migrated to `passwordHash`. */
+  password: z.string().min(8).optional(),
+  /** bcrypt hash of the password — what's persisted at rest. */
+  passwordHash: z.string().optional()
 });
 
 export const daemonConfigSchema = z.object({

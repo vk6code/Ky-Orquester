@@ -92,6 +92,13 @@ export interface FsWriteRequest {
   content: string;
 }
 
+/** Public auth metadata for the HTTP transport (no secrets). */
+export interface AuthInfoResponse {
+  authRequired: boolean;
+  /** bcrypt salt prefix the client uses to derive the bearer hash, or null. */
+  salt: string | null;
+}
+
 /** A pluggable coding agent the daemon detected on the host. */
 export interface AgentSummary {
   id: string;

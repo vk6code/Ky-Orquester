@@ -3,6 +3,7 @@ import { Sidebar } from "../sidebar";
 import { TopBar } from "../topbar";
 import { MainView } from "../main";
 import { SettingsModal } from "../settings";
+import { AuthModal } from "../auth";
 
 /**
  * Primary layout: full-height sidebar on the left, and a main column whose top
@@ -16,5 +17,6 @@ export const AppShell: React.FC = () => (
       <MainView />
     </div>
     <SettingsModal />
+    <AuthModal />
   </div>
 );

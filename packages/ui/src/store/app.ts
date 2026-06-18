@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import { create } from "zustand";
-import { ApiClient } from "../lib/api-client";
+import { ApiClient, ApiError } from "../lib/api-client";
 import { createTransporter } from "../lib/transporters";
 import { toRemoteConfig, toUiConnection } from "../lib/connections";
+import { clearStoredHash, deriveAuthHash, loadStoredHash, storeHash } from "../lib/auth";
 import type { AppConfigAdapter } from "../lib/app-config";
 import type { HttpClient } from "../lib/http-client";
 import type { Transporter } from "../lib/transporter";
@@ -59,6 +60,12 @@ async function persistRemotes(connections: UiConnection[]): Promise<void> {
     .catch(() => undefined);
 }
 
+/** Rebuild an ApiClient for the same connection but with a bearer credential. */
+function apiWithPassword(api: ApiClient, password: string): ApiClient {
+  const connection: UiConnection = { ...api.connection, password };
+  return new ApiClient(connection, buildTransporter(connection));
+}
+
 /** Build the transporter for a connection: local uses the injected one. */
 function buildTransporter(connection: UiConnection): Transporter {
   if (setup && connection.id === setup.localConnection.id && setup.localTransporter) {
@@ -102,6 +109,10 @@ export interface AppState {
   settingsOpen: boolean;
   sidebarCollapsed: boolean;
 
+  // auth (web → password-protected HTTP daemon)
+  authPrompt: { connectionId: string } | null;
+  authSalt: string | null;
+
   // navigation
   currentWorkspace: string | null;
   currentProject: ProjectSummary | null;
@@ -135,6 +146,10 @@ export interface AppState {
   toggleSidebar: () => void;
   updateAppConfig: (patch: Partial<UiAppConfig>) => Promise<void>;
 
+  // auth
+  submitPassword: (password: string) => Promise<void>;
+  signOut: () => void;
+
   loadWorkspaces: () => Promise<void>;
   createWorkspace: (name: string) => Promise<void>;
   openWorkspace: (name: string) => Promise<void>;
@@ -161,6 +176,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   appConfig: { useTitlebar: false },
   settingsOpen: false,
   sidebarCollapsed: false,
+  authPrompt: null,
+  authSalt: null,
   currentWorkspace: null,
   currentProject: null,
   workspaces: [],
@@ -174,19 +191,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   setApi: (api) => set({ api }),
 
   connect: async () => {
-    const api = get().api;
-    if (!api) {
+    const initial = get().api;
+    if (!initial) {
       return;
     }
     set({ connectionStatus: "connecting" });
 
     // The embedded daemon is spawned asynchronously: poll /health first.
     for (let attempt = 0; attempt < 60; attempt += 1) {
-      if (get().api !== api) {
+      if (get().api !== initial) {
         return;
       }
       try {
-        await api.health();
+        await initial.health();
         break;
       } catch {
         await delay(500);
@@ -198,12 +215,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
-    set({ connectionStatus: "connected" });
+    // Auth gate: if the daemon requires a token, derive/restore the bcrypt-hash
+    // bearer (web) or prompt for the password.
+    let api = initial;
+    const info = await api.authInfo().catch(() => null);
+    set({ authSalt: info?.salt ?? null });
+    if (info?.authRequired) {
+      const hash = api.connection.password ?? loadStoredHash(api.connection.endpoint);
+      if (!hash) {
+        set({ connectionStatus: "error", authPrompt: { connectionId: api.connection.id } });
+        return;
+      }
+      if (api.connection.password !== hash) {
+        api = apiWithPassword(api, hash);
+        set({ api });
+      }
+    }
+
+    set({ connectionStatus: "connected", authPrompt: null });
     await Promise.all([get().loadWorkspaces(), get().loadSessions()]);
 
     // Subscribe to the event bus for cross-client session sync.
     eventsUnsubscribe?.();
-    eventsUnsubscribe = api.openEvents((event) => get().applyEvent(event));
+    eventsUnsubscribe = get().api?.openEvents((event) => get().applyEvent(event)) ?? null;
   },
 
   initConnections: async (nextSetup) => {
@@ -261,6 +295,28 @@ export const useAppStore = create<AppState>((set, get) => ({
     await result?.catch(() => undefined);
   },
 
+  submitPassword: async (password) => {
+    const api = get().api;
+    const salt = get().authSalt;
+    if (!api || !salt) {
+      return;
+    }
+    // Derive the same bcrypt hash the daemon stores; persist it (never the
+    // plaintext) and use it as the bearer.
+    const hash = deriveAuthHash(password, salt);
+    storeHash(api.connection.endpoint, hash);
+    set({ api: apiWithPassword(api, hash), authPrompt: null });
+    await get().connect();
+  },
+
+  signOut: () => {
+    const api = get().api;
+    if (api) {
+      clearStoredHash(api.connection.endpoint);
+      set({ api: apiWithPassword(api, ""), authPrompt: { connectionId: api.connection.id } });
+    }
+  },
+
   selectConnection: async (id) => {
     const connection = get().connections.find((c) => c.id === id);
     if (!connection || id === get().activeConnectionId) {
@@ -314,7 +370,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ workspaces: await workspaceService.list(api) });
     } catch (error) {
-      console.error("[orquester] failed to load workspaces", error);
+      // A wrong/stale token surfaces here — clear it and re-prompt.
+      if (error instanceof ApiError && error.status === 401) {
+        clearStoredHash(api.connection.endpoint);
+        set({ connectionStatus: "error", authPrompt: { connectionId: api.connection.id } });
+      } else {
+        console.error("[orquester] failed to load workspaces", error);
+      }
     } finally {
       set({ workspacesLoading: false });
     }
