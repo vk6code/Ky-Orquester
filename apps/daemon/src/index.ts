@@ -358,6 +358,13 @@ function createServer(
     return sanitizeDaemonConfig(config);
   });
 
+  if (options.mode === "local") {
+    app.post("/api/daemon/shutdown", async (_request, reply) => {
+      services.broadcaster.publish("daemon", "daemon.shutdown", {});
+      return reply.code(204).send();
+    });
+  }
+
   // Filesystem-backed workspaces & projects:
   //   (workspacesDir)/<workspace>           -> a workspace
   //   (workspacesDir)/<workspace>/<project> -> a project

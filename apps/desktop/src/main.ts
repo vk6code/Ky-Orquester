@@ -23,7 +23,45 @@ let daemon: RunningDaemon | undefined;
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let daemonSocketPath: string | undefined;
+let isDaemonOwner = false;
 let quitting = false;
+
+function checkExistingDaemon(socketPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (process.platform !== "win32" && !fs.existsSync(socketPath)) {
+      resolve(false);
+      return;
+    }
+    const req = http.request(
+      { socketPath, path: "/api/config/daemon", method: "GET" },
+      (res) => {
+        resolve(res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300);
+      }
+    );
+    req.on("error", () => resolve(false));
+    req.end();
+  });
+}
+
+function listenForDaemonShutdown(): void {
+  if (!daemonSocketPath) return;
+  const req = http.request({ socketPath: daemonSocketPath, path: "/events", method: "GET" }, (res) => {
+    res.setEncoding("utf8");
+    res.on("data", (chunk: string) => {
+      if (chunk.includes('"daemon.shutdown"')) {
+        quitting = true;
+        app.quit();
+      }
+    });
+    res.on("end", () => {
+      if (!quitting && !isDaemonOwner) app.quit();
+    });
+  });
+  req.on("error", () => {
+    if (!quitting && !isDaemonOwner) app.quit();
+  });
+  req.end();
+}
 
 const desktopRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(desktopRoot, "../..");
@@ -277,9 +315,10 @@ async function rebuildTrayMenu(): Promise<void> {
       { label: `HTTP transport: ${enabled ? "On" : "Off"}`, click: () => void toggleHttp() },
       { type: "separator" },
       {
-        label: "Quit daemon",
-        click: () => {
+        label: "Quit",
+        click: async () => {
           quitting = true;
+          await requestOverSocket({ method: "POST", path: "/api/daemon/shutdown" }).catch(() => {});
           void stopIntegratedDaemon().finally(() => app.quit());
         }
       }
@@ -320,7 +359,7 @@ function createWindow(): void {
 
   // Run-in-background: closing hides the window (daemon + tray keep running).
   mainWindow.on("close", (event) => {
-    if (!quitting && runInBackground()) {
+    if (!quitting && runInBackground() && isDaemonOwner) {
       event.preventDefault();
       mainWindow?.hide();
     }
@@ -339,9 +378,25 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   ensureAppFiles();
-  await startIntegratedDaemon();
+  const socketPath = socketPathFor();
+
+  if (await checkExistingDaemon(socketPath)) {
+    daemonSocketPath = socketPath;
+    process.env.ORQUESTER_UNIX_SOCKET = socketPath;
+    isDaemonOwner = false;
+  } else {
+    if (process.platform !== "win32" && fs.existsSync(socketPath)) {
+      fs.unlinkSync(socketPath);
+    }
+    await startIntegratedDaemon();
+    isDaemonOwner = true;
+  }
+
+  listenForDaemonShutdown();
   registerIpc();
-  createTray();
+  if (isDaemonOwner) {
+    createTray();
+  }
   createWindow();
 
   app.on("activate", () => {
@@ -356,7 +411,7 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   // In background mode the tray keeps the app (and daemon) alive.
-  if (!runInBackground() && process.platform !== "darwin") {
+  if ((!runInBackground() || !isDaemonOwner) && process.platform !== "darwin") {
     app.quit();
   }
 });
