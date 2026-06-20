@@ -9,7 +9,7 @@
     "dev:bare": "pnpm --filter @orquester/desktop dev",
     "dev:daemon": "cross-env ORQUESTER_APPDIR=./.stage tsx watch apps/daemon/src/cli.ts",
     "dev:daemon:bare": "tsx watch apps/daemon/src/cli.ts",
-    "dev:web": "cross-env VITE_ORQUESTER_API_URL=http://127.0.0.1:47831 pnpm --filter @orquester/web dev",
+    "dev:web": "cross-env VITE_ORQUESTER_API_URL=http://127.0.0.1:57831 pnpm --filter @orquester/web dev",
     "dev:desktop": "pnpm --filter @orquester/desktop dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",

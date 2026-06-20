@@ -6,7 +6,7 @@
     "http": {
       "enabled": true,
       "host": "0.0.0.0",
-      "port": 47831,
+      "port": 57831,
       "passwordHash": "$2b$10$d/t5uzBqvZnjBASDICtJue4H2cMlRPyFtvivvMcMhuHgfoFKxoINe"
     }
   }

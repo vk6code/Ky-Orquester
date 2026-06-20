@@ -312,7 +312,7 @@ const DaemonSettings: React.FC = () => {
           http: {
             enabled: httpEnabled,
             host,
-            port: Number(port) || 47831,
+            port: Number(port) || 57831,
             ...(password ? { password } : {})
           }
         }

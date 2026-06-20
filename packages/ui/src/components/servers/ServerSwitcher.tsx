@@ -86,7 +86,7 @@ export const ServerSwitcher: React.FC = () => {
           <div className="space-y-1.5 p-1.5" onClick={(e) => e.stopPropagation()}>
             <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
             <Input
-              placeholder="https://host:47831"
+              placeholder="https://host:57831"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />

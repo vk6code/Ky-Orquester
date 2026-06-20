@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
-    "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5174\" \"pnpm build:main --watch\" \"wait-on http://127.0.0.1:5174 dist-electron/main.cjs && cross-env ORQUESTER_DESKTOP_DEV_URL=http://127.0.0.1:5174 electron .\"",
+    "dev": "concurrently -k \"vite --host 127.0.0.1 --port 6174\" \"pnpm build:main --watch\" \"wait-on http://127.0.0.1:6174 dist-electron/main.cjs && cross-env ORQUESTER_DESKTOP_DEV_URL=http://127.0.0.1:6174 electron .\"",
     "build:main": "tsx scripts/build-main.ts",
     "build:ui": "vite build",
     "build:electron": "electron-builder",

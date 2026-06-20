@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const ORQUESTER_DIR_NAME = ".orquester";
 export const DEFAULT_HTTP_HOST = "127.0.0.1";
-export const DEFAULT_HTTP_PORT = 47831;
+export const DEFAULT_HTTP_PORT = 57831;
 export const LOCAL_CONNECTION_ID = "local";
 
 export type RuntimePlatform = "win32" | "darwin" | "linux" | string;
