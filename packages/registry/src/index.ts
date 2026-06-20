@@ -73,6 +73,24 @@ export const REGISTRY = {
       versionFlag: "--version",
       installCmd: "npm install -g opencode-ai",
       updateCmd: "npm update -g opencode-ai"
+    },
+    {
+      id: "kimi",
+      name: "Kimi Code CLI",
+      kind: "agent",
+      bin: ["kimi"] as const,
+      versionFlag: "--version",
+      installCmd: "npm install -g @moonshot-ai/kimi-code",
+      updateCmd: "npm install -g @moonshot-ai/kimi-code@latest"
+    },
+    {
+      id: "pi",
+      name: "Pi Coding Agent",
+      kind: "agent",
+      bin: ["pi"] as const,
+      versionFlag: "--version",
+      installCmd: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
+      updateCmd: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@latest"
     }
   ] as const,
 

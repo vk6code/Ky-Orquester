@@ -710,10 +710,21 @@ function isValidName(name: string | undefined): name is string {
 async function listDirectories(path: string): Promise<string[]> {
   try {
     const entries = await readdir(path, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-      .map((entry) => entry.name)
-      .sort((a, b) => a.localeCompare(b));
+    const names: string[] = [];
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue;
+      if (entry.isDirectory()) {
+        names.push(entry.name);
+      } else if (entry.isSymbolicLink()) {
+        try {
+          const target = await stat(join(path, entry.name));
+          if (target.isDirectory()) names.push(entry.name);
+        } catch {
+          /* broken symlink – ignore */
+        }
+      }
+    }
+    return names.sort((a, b) => a.localeCompare(b));
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
       return [];
