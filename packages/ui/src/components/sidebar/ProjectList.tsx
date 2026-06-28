@@ -7,6 +7,8 @@ import {
   PanelLeftClose,
   Pencil,
   Plus,
+  RotateCcw,
+  Trash2,
   Banana,
   Workflow
 } from "lucide-react";
@@ -25,18 +27,23 @@ export const ProjectList: React.FC = () => {
   const projects = useAppStore((s) => s.projects);
   const workspaces = useAppStore((s) => s.workspaces);
   const labels = useAppStore((s) => s.labels);
+  const hidden = useAppStore((s) => s.hidden);
   const loading = useAppStore((s) => s.projectsLoading);
   const closeWorkspace = useAppStore((s) => s.closeWorkspace);
   const openProject = useAppStore((s) => s.openProject);
   const createProject = useAppStore((s) => s.createProject);
   const setLabel = useAppStore((s) => s.setLabel);
+  const setHidden = useAppStore((s) => s.setHidden);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const openGorila360Plans = useAppStore((s) => s.openGorila360Plans);
   const openLoopRunner = useAppStore((s) => s.openLoopRunner);
   const [creating, setCreating] = useState<null | "project" | "folder">(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
   // The header shows the current workspace; resolve its display label by path.
   const workspacePath = workspaces.find((w) => w.name === currentWorkspace)?.path;
+  const visible = projects.filter((p) => !hidden.includes(p.path));
+  const hiddenProjects = projects.filter((p) => hidden.includes(p.path));
   // Linking an external server folder as a project (symlink under the workspace).
   const [linkPicking, setLinkPicking] = useState(false);
   const [linkPath, setLinkPath] = useState<string | null>(null);
@@ -102,10 +109,10 @@ export const ProjectList: React.FC = () => {
         {loading && projects.length === 0 && (
           <p className="px-2 py-2 text-xs text-neutral-600">Loading…</p>
         )}
-        {!loading && projects.length === 0 && !creating && (
+        {!loading && visible.length === 0 && !creating && (
           <p className="px-2 py-2 text-xs text-neutral-600">No projects yet</p>
         )}
-        {projects.map((project) =>
+        {visible.map((project) =>
           editing === project.path ? (
             <NewItemInput
               key={project.path}
@@ -140,8 +147,49 @@ export const ProjectList: React.FC = () => {
               >
                 <Pencil size={13} />
               </button>
+              <button
+                type="button"
+                aria-label="Remove from Orquester"
+                title="Remove from Orquester (does not delete files)"
+                className="hidden h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-red-400 group-hover:flex"
+                onClick={() => void setHidden(project.path, true)}
+              >
+                <Trash2 size={13} />
+              </button>
             </div>
           )
+        )}
+
+        {hiddenProjects.length > 0 && (
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => setShowHidden((v) => !v)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[11px] text-neutral-600 hover:text-neutral-400"
+            >
+              <Trash2 size={12} />
+              <span className="flex-1">Removed ({hiddenProjects.length})</span>
+              <span>{showHidden ? "hide" : "show"}</span>
+            </button>
+            {showHidden &&
+              hiddenProjects.map((project) => (
+                <div key={project.path} className="group flex items-center opacity-60">
+                  <span className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-sm text-neutral-400">
+                    <Box size={15} className="text-neutral-600" />
+                    <span className="flex-1 truncate">{labels[project.path] ?? project.name}</span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Restore"
+                    title="Restore to Orquester"
+                    className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-emerald-400"
+                    onClick={() => void setHidden(project.path, false)}
+                  >
+                    <RotateCcw size={13} />
+                  </button>
+                </div>
+              ))}
+          </div>
         )}
       </nav>
 

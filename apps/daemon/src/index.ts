@@ -30,6 +30,7 @@ import {
   type ConfigVars,
   type DaemonConfig,
   type DaemonPaths,
+  type HiddenConfig,
   type LabelsConfig,
   type RemoteConnectionConfig,
   type RemotesConfig,
@@ -37,13 +38,16 @@ import {
   createDefaultAppConfig,
   createDefaultClientConfig,
   createDefaultDaemonConfig,
+  createDefaultHiddenConfig,
   createDefaultLabelsConfig,
   createDefaultRemotesConfig,
   dailyLogFile,
   expandVars,
+  hiddenConfigPath,
   labelsConfigPath,
   parseAppConfig,
   parseDaemonConfig,
+  parseHiddenConfig,
   parseLabelsConfig,
   parseRemotesConfig,
   remotesConfigPath,
@@ -70,6 +74,7 @@ interface ResolvedPaths {
   appConfigFile: string;
   remotesFile: string;
   labelsFile: string;
+  hiddenFile: string;
   workspacesDir: string;
   logsDir: string;
   vars: ConfigVars;
@@ -113,6 +118,7 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<Run
     appConfigFile: appConfigPath(paths.baseDir),
     remotesFile: remotesConfigPath(paths.baseDir),
     labelsFile: labelsConfigPath(paths.baseDir),
+    hiddenFile: hiddenConfigPath(paths.baseDir),
     workspacesDir: expandVars(config.workspacesDir, paths.vars),
     logsDir: expandVars(config.logsDir, paths.vars),
     vars: paths.vars
@@ -501,6 +507,26 @@ function createServer(
     }
   });
 
+  // Hidden workspace/project paths (hidden.json). Removes items from the sidebar
+  // only — the folders on disk are never deleted or moved.
+  app.get(
+    "/api/config/hidden",
+    async (): Promise<string[]> => (await readHiddenFile(resolved.hiddenFile)).hidden
+  );
+
+  app.put("/api/config/hidden", async (request, reply): Promise<string[] | void> => {
+    try {
+      const parsed = parseHiddenConfig({
+        version: 1,
+        hidden: Array.isArray(request.body) ? request.body : []
+      });
+      await writeJsonFile(resolved.hiddenFile, parsed);
+      return parsed.hidden;
+    } catch {
+      return reply.code(400).send({ code: "INVALID_CONFIG", message: "Invalid hidden config." });
+    }
+  });
+
   // File browser: list a directory.
   app.get<{ Querystring: { path?: string } }>(
     "/api/fs",
@@ -866,6 +892,14 @@ async function readLabelsFile(file: string): Promise<LabelsConfig> {
     return parseLabelsConfig(JSON.parse(await readFile(file, "utf8")));
   } catch {
     return createDefaultLabelsConfig();
+  }
+}
+
+async function readHiddenFile(file: string): Promise<HiddenConfig> {
+  try {
+    return parseHiddenConfig(JSON.parse(await readFile(file, "utf8")));
+  } catch {
+    return createDefaultHiddenConfig();
   }
 }
 

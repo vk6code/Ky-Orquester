@@ -88,6 +88,10 @@ export function labelsConfigPath(baseDir: string): string {
   return joinPath(appConfigDir(baseDir), "labels.json");
 }
 
+export function hiddenConfigPath(baseDir: string): string {
+  return joinPath(appConfigDir(baseDir), "hidden.json");
+}
+
 export function daemonConfigPath(baseDir: string): string {
   return joinPath(daemonConfigDir(baseDir), "daemon.json");
 }
@@ -281,6 +285,24 @@ export function createDefaultLabelsConfig(): LabelsConfig {
 
 export function parseLabelsConfig(value: unknown): LabelsConfig {
   return labelsConfigSchema.parse(value);
+}
+
+// hidden.json (workspace/project paths hidden from the Orquester sidebar; the
+// folders on disk are never touched — this only removes them from the UI)
+
+export const hiddenConfigSchema = z.object({
+  version: z.literal(1).default(1),
+  hidden: z.array(z.string()).default([])
+});
+
+export type HiddenConfig = z.infer<typeof hiddenConfigSchema>;
+
+export function createDefaultHiddenConfig(): HiddenConfig {
+  return hiddenConfigSchema.parse({ hidden: [] });
+}
+
+export function parseHiddenConfig(value: unknown): HiddenConfig {
+  return hiddenConfigSchema.parse(value);
 }
 
 // ClientConfig — what the daemon reports about how to reach itself.}

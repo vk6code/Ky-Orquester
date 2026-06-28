@@ -209,6 +209,8 @@ export interface AppState {
   projectsLoading: boolean;
   /** Display-only name overrides for workspaces/projects, keyed by abs path. */
   labels: Record<string, string>;
+  /** Workspace/project paths hidden from the sidebar (disk untouched). */
+  hidden: string[];
 
   /** All daemon sessions; a project's sessions are its tabs. */
   sessions: SessionSummary[];
@@ -263,6 +265,11 @@ export interface AppState {
   /** Set (or clear, when blank) a display name for a workspace/project path. */
   setLabel: (path: string, name: string) => Promise<void>;
 
+  /** Load the hidden workspace/project list for the active daemon. */
+  loadHidden: () => Promise<void>;
+  /** Hide or restore a workspace/project in the sidebar (disk untouched). */
+  setHidden: (path: string, hidden: boolean) => Promise<void>;
+
   loadSessions: () => Promise<void>;
   loadRegistry: () => Promise<void>;
   installAgent: (id: string) => Promise<void>;
@@ -305,6 +312,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   projects: [],
   projectsLoading: false,
   labels: {},
+  hidden: [],
   sessions: [],
   fileTabsByProject: {},
   plansTabsByProject: {},
@@ -368,7 +376,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         get().loadWorkspaces(),
         get().loadSessions(),
         get().loadRegistry(),
-        get().loadLabels()
+        get().loadLabels(),
+        get().loadHidden()
       ]);
     } catch {
       // signOut is called by the loader that received 401.
@@ -560,6 +569,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       workspaces: [],
       projects: [],
       labels: {},
+      hidden: [],
       sessions: [],
       fileTabsByProject: {},
       plansTabsByProject: {},
@@ -718,6 +728,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ labels });
     await api.saveLabels(labels).catch(() => undefined);
+  },
+
+  loadHidden: async () => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    try {
+      set({ hidden: await api.listHidden() });
+    } catch {
+      set({ hidden: [] });
+    }
+  },
+
+  setHidden: async (path, hidden) => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    const next = hidden
+      ? [...new Set([...get().hidden, path])]
+      : get().hidden.filter((p) => p !== path);
+    set({ hidden: next });
+    await api.saveHidden(next).catch(() => undefined);
   },
 
   loadSessions: async () => {

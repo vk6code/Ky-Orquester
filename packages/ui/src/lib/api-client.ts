@@ -149,6 +149,15 @@ export class ApiClient {
     return this.send("PUT", "/api/config/labels", { body: labels });
   }
 
+  // Workspace/project paths hidden from the sidebar (disk untouched).
+  listHidden(signal?: AbortSignal): Promise<string[]> {
+    return this.send("GET", "/api/config/hidden", { signal });
+  }
+
+  saveHidden(paths: string[]): Promise<string[]> {
+    return this.send("PUT", "/api/config/hidden", { body: paths });
+  }
+
   // Workspaces & projects (filesystem-backed)
 
   listWorkspaces(signal?: AbortSignal): Promise<WorkspaceSummary[]> {
