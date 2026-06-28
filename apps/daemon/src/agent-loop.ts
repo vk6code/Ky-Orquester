@@ -20,7 +20,7 @@ const TURN_SCRIPT = join(SCRIPTS_DIR, "loop-chain-turn.sh");
 const CHANNEL = "agent-loops";
 const DONE_TOKEN = "<<LOOP_DONE>>";
 /** Agents whose one-shot invocation loop-chain-turn.sh knows how to drive. */
-const SUPPORTED_AGENTS = new Set(["claude", "codex"]);
+const SUPPORTED_AGENTS = new Set(["claude", "codex", "opencode", "kimi", "pi", "gemini"]);
 const POLL_MS = 1000;
 const TURN_TIMEOUT_MS = 60 * 60 * 1000; // 1h per turn
 
@@ -188,9 +188,10 @@ export function registerAgentLoopRoutes(app: FastifyInstance, services: AgentLoo
         return reply.code(400).send({ code: "INVALID_TASK", message: "task is required." });
       }
       if (!Array.isArray(agents) || agents.length === 0 || !agents.every((a) => SUPPORTED_AGENTS.has(a))) {
-        return reply
-          .code(400)
-          .send({ code: "INVALID_AGENTS", message: "agents must be a non-empty list of 'claude' or 'codex'." });
+        return reply.code(400).send({
+          code: "INVALID_AGENTS",
+          message: `agents must be a non-empty list of: ${[...SUPPORTED_AGENTS].join(", ")}.`
+        });
       }
       const rounds = Number.isFinite(maxRounds) && maxRounds > 0 ? Math.min(Math.floor(maxRounds), 50) : 1;
 

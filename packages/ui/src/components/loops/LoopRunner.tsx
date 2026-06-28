@@ -18,10 +18,17 @@ import { Button, Input } from "../ui";
 
 const AGENTS = [
   { id: "claude" as const, name: "Claude Code" },
-  { id: "codex" as const, name: "Codex" }
+  { id: "codex" as const, name: "Codex" },
+  { id: "opencode" as const, name: "OpenCode" },
+  { id: "kimi" as const, name: "Kimi" },
+  { id: "pi" as const, name: "Pi" },
+  { id: "gemini" as const, name: "Gemini" }
 ];
 
 const AGENT_NAME: Record<string, string> = Object.fromEntries(AGENTS.map((a) => [a.id, a.name]));
+
+/** Agents offered for the single-shot loop (only claude/codex are wired there). */
+const SINGLE_AGENTS = AGENTS.filter((a) => a.id === "claude" || a.id === "codex");
 
 type Mode = "relay" | "single";
 
@@ -270,7 +277,7 @@ const SinglePanel: React.FC = () => {
   const [baseRef, setBaseRef] = useState("");
   const [planPath, setPlanPath] = useState("");
   const [phase, setPhase] = useState("coding");
-  const [agent, setAgent] = useState<(typeof AGENTS)[number]["id"]>("claude");
+  const [agent, setAgent] = useState<"claude" | "codex">("claude");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<LoopRunResponse | null>(null);
@@ -340,10 +347,10 @@ const SinglePanel: React.FC = () => {
               <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">Agent</span>
               <select
                 value={agent}
-                onChange={(event) => setAgent(event.target.value as (typeof AGENTS)[number]["id"])}
+                onChange={(event) => setAgent(event.target.value as "claude" | "codex")}
                 className="h-9 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-100 outline-none focus:ring-1 focus:ring-neutral-500"
               >
-                {AGENTS.map((item) => (
+                {SINGLE_AGENTS.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
                   </option>

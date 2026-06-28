@@ -34,16 +34,32 @@ echo "════════════════════════�
 
 PROMPT="$(cat "$BATON")"
 
-if [[ "$AGENT" == "claude" ]]; then
-  claude -p --dangerously-skip-permissions "$PROMPT" 2>&1 | tee "$OUTFILE"
-  CODE=${PIPESTATUS[0]}
-elif [[ "$AGENT" == "codex" ]]; then
-  codex exec "$PROMPT" 2>&1 | tee "$OUTFILE"
-  CODE=${PIPESTATUS[0]}
-else
-  echo "❌ Agente no soportado: $AGENT" | tee "$OUTFILE"
-  CODE=2
-fi
+# Each agent runs ONE-SHOT, non-interactive, auto-approving tool calls, with
+# output mirrored to the terminal and to OUTFILE. CODE captures the agent's
+# exit status (not tee's).
+case "$AGENT" in
+  claude)
+    claude -p --dangerously-skip-permissions "$PROMPT" 2>&1 | tee "$OUTFILE"
+    CODE=${PIPESTATUS[0]} ;;
+  codex)
+    codex exec "$PROMPT" 2>&1 | tee "$OUTFILE"
+    CODE=${PIPESTATUS[0]} ;;
+  opencode)
+    opencode run "$PROMPT" 2>&1 | tee "$OUTFILE"
+    CODE=${PIPESTATUS[0]} ;;
+  kimi)
+    kimi --print --yolo --prompt "$PROMPT" 2>&1 | tee "$OUTFILE"
+    CODE=${PIPESTATUS[0]} ;;
+  pi)
+    pi --print "$PROMPT" 2>&1 | tee "$OUTFILE"
+    CODE=${PIPESTATUS[0]} ;;
+  gemini)
+    gemini -p "$PROMPT" --yolo 2>&1 | tee "$OUTFILE"
+    CODE=${PIPESTATUS[0]} ;;
+  *)
+    echo "❌ Agente no soportado: $AGENT" | tee "$OUTFILE"
+    CODE=2 ;;
+esac
 
 echo ""
 echo "✅ Turno $((ROUND + 1)) terminado (exit $CODE)"
