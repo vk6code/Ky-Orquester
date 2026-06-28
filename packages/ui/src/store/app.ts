@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import { ApiClient, ApiError } from "../lib/api-client";
 import { createTransporter } from "../lib/transporters";
 import { toRemoteConfig, toUiConnection } from "../lib/connections";
@@ -302,7 +303,58 @@ export interface AppState {
   applyEvent: (event: EventMessage) => void;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+/**
+ * Persist a small slice of navigation state (which project is open + the
+ * client-local tabs) so reopening the app — e.g. after backgrounding it on a
+ * phone — drops you back where you were instead of an empty workspace list.
+ * The daemon keeps the PTYs alive regardless; this only restores the UI.
+ *
+ * The snapshot expires after PERSIST_TTL_MS: come back within the window and
+ * everything is restored; after it, you start clean.
+ */
+const PERSIST_KEY = "orquester-nav";
+const PERSIST_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+const ttlStorage = createJSONStorage(() => ({
+  getItem: (name: string): string | null => {
+    try {
+      if (typeof localStorage === "undefined") return null;
+      const raw = localStorage.getItem(name);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { savedAt?: number; blob?: string };
+      if (
+        typeof parsed.blob !== "string" ||
+        typeof parsed.savedAt !== "number" ||
+        Date.now() - parsed.savedAt > PERSIST_TTL_MS
+      ) {
+        localStorage.removeItem(name);
+        return null;
+      }
+      return parsed.blob;
+    } catch {
+      return null;
+    }
+  },
+  setItem: (name: string, value: string): void => {
+    try {
+      if (typeof localStorage === "undefined") return;
+      localStorage.setItem(name, JSON.stringify({ savedAt: Date.now(), blob: value }));
+    } catch {
+      /* quota exceeded / storage unavailable */
+    }
+  },
+  removeItem: (name: string): void => {
+    try {
+      if (typeof localStorage !== "undefined") localStorage.removeItem(name);
+    } catch {
+      /* ignore */
+    }
+  }
+}));
+
+export const useAppStore = create<AppState>()(
+  persist(
+    (set, get) => ({
   api: null,
   connectionStatus: "connecting",
   reconnectAttempt: 0,
@@ -400,6 +452,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       storeHash(active.connection.endpoint, active.connection.password);
     }
     set({ connectionStatus: "connected", reconnectAttempt: 0, authPrompt: null });
+
+    // If a workspace was restored from a previous session (persisted nav state),
+    // load its projects so the restored project + tabs render instead of an
+    // empty list.
+    if (get().currentWorkspace && get().projects.length === 0) {
+      void get().loadProjects();
+    }
 
     // Live event sync. The stream ending unexpectedly (e.g. the transport was
     // restarted) is the primary disconnect signal.
@@ -1006,7 +1065,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((state) => removeSession(state, id));
     }
   }
-}));
+    }),
+    {
+      name: PERSIST_KEY,
+      storage: ttlStorage,
+      version: 1,
+      // Only navigation state — never the api client, connections, or live
+      // daemon data (sessions/workspaces are reloaded fresh on reconnect).
+      partialize: (state) => ({
+        currentWorkspace: state.currentWorkspace,
+        currentProject: state.currentProject,
+        activeTabByProject: state.activeTabByProject,
+        fileTabsByProject: state.fileTabsByProject,
+        plansTabsByProject: state.plansTabsByProject,
+        loopTabsByProject: state.loopTabsByProject,
+        agentTabsByProject: state.agentTabsByProject
+      })
+    }
+  )
+);
 
 /** First remaining tab id for a project (session preferred, then loop/plans/agent/files). */
 function firstTabId(
