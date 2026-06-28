@@ -59,6 +59,39 @@ export interface CreateProjectRequest {
   name: string;
 }
 
+/** A loop target can be a git repo or a plain directory. */
+export type LoopTargetKind = "repo" | "directory";
+
+/** Target metadata for a loop run. */
+export interface LoopTargetSpec {
+  kind: LoopTargetKind;
+  path: string;
+  branch?: string;
+  baseRef?: string;
+}
+
+/** Launch parameters for a generic development loop. */
+export interface LoopRunRequest {
+  target: LoopTargetSpec;
+  planPath: string;
+  phase: string;
+  agent?: "claude" | "codex";
+  projectPath?: string;
+}
+
+/** Result returned when a loop is launched. */
+export interface LoopRunResponse {
+  ok: true;
+  target: LoopTargetSpec;
+  phase: string;
+  agent: string;
+  projectPath: string;
+  executionPath: string;
+  worktree?: string;
+  sessionId: string;
+  outputUrl: string;
+}
+
 /** A filesystem entry returned by the file browser. */
 export interface FsEntry {
   name: string;

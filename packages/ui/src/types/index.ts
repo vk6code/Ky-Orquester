@@ -32,6 +32,35 @@ export interface UiConnection {
   password?: string;
 }
 
+export interface Gorila360PlanSummary {
+  id: string;
+  name: string;
+  filename: string;
+  path: string;
+  updatedAt: string;
+}
+
+export type Gorila360LoopRunRequest = {
+  repo: "backend" | "frontend";
+  branch: string;
+  planPath: string;
+  phase: string;
+  agent?: "claude" | "codex";
+  projectPath?: string;
+};
+
+export interface Gorila360LoopRunResponse {
+  ok: true;
+  repo: string;
+  branch: string;
+  phase: string;
+  agent: string;
+  projectPath: string;
+  worktree: string;
+  sessionId: string;
+  outputUrl: string;
+}
+
 export type {
   AgentSummary,
   EventMessage,
@@ -42,5 +71,9 @@ export type {
   RegistryResponse,
   SessionStatus,
   SessionSummary,
-  WorkspaceSummary
-};
+  WorkspaceSummary,
+  LoopRunRequest,
+  LoopRunResponse,
+  LoopTargetKind,
+  LoopTargetSpec
+} from "@orquester/api";

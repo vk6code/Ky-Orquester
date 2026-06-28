@@ -8,6 +8,8 @@ import type {
   FsListResponse,
   FsReadResponse,
   HealthResponse,
+  LoopRunRequest,
+  LoopRunResponse,
   OpenResult,
   OpenTargetSummary,
   ProjectSummary,
@@ -18,7 +20,7 @@ import type {
   WorkspaceSummary
 } from "@orquester/api";
 import type { AppConfig, DaemonConfig, RemoteConnectionConfig } from "@orquester/config";
-import type { UiConnection } from "../types";
+import type { Gorila360LoopRunRequest, Gorila360LoopRunResponse, Gorila360PlanSummary, UiConnection } from "../types";
 import type {
   StreamHandle,
   StreamHandlers,
@@ -244,6 +246,20 @@ export class ApiClient {
   /** Open the live output stream for a session (buffer replay + live bytes). */
   openSessionOutput(id: string, handlers: StreamHandlers): StreamHandle {
     return this.transporter.openStream(`/api/sessions/${encodeURIComponent(id)}/output`, handlers);
+  }
+
+  // Gorila360 integration
+
+  listGorila360Plans(signal?: AbortSignal): Promise<Gorila360PlanSummary[]> {
+    return this.send("GET", "/api/gorila360/plans", { signal });
+  }
+
+  runLoop(req: LoopRunRequest): Promise<LoopRunResponse> {
+    return this.send("POST", "/api/loops", { body: req });
+  }
+
+  runGorila360Loop(req: Gorila360LoopRunRequest): Promise<Gorila360LoopRunResponse> {
+    return this.send("POST", "/api/gorila360/loops", { body: req });
   }
 }
 

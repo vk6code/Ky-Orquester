@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { useApi } from "../../context/orquester-context";
+import { useIsDesktop } from "../../hooks";
 import type { SessionSummary } from "../../types";
 
 const FONT_STACK =
@@ -40,16 +41,30 @@ const THEME: ITheme = {
  * like Ctrl-C `\x03`) are forwarded as input; the session's output stream is
  * replayed (current buffer) then streamed live. The PTY lives in the daemon,
  * so unmounting this view does not kill the session.
+ *
+ * Mobile-specific handling:
+ * - WebGL renderer is skipped on small viewports to avoid black screens after
+ *   the app returns from background.
+ * - The stream is re-opened if it closes while the tab is visible, so users
+ *   don't lose live output after switching apps.
+ * - A resize/fit is forced when the page becomes visible again.
  */
 export const TerminalView: React.FC<{ session: SessionSummary }> = ({ session }) => {
   const api = useApi();
+  const isDesktop = useIsDesktop();
   const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const inputSubRef = useRef<{ dispose: () => void } | null>(null);
+  const closingRef = useRef(false);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
     }
+
+    closingRef.current = false;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -66,49 +81,91 @@ export const TerminalView: React.FC<{ session: SessionSummary }> = ({ session })
       macOptionIsMeta: true,
       theme: THEME
     });
+    termRef.current = term;
+
     const fit = new FitAddon();
+    fitRef.current = fit;
     term.loadAddon(fit);
     term.open(container);
 
-    // Crisp GPU rendering when available; harmless fallback otherwise.
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch {
-      /* keep the default canvas/DOM renderer */
+    // Use WebGL only on desktop; mobile GPU contexts are often dropped when the
+    // app goes to background, leaving a black/blank terminal on resume.
+    if (isDesktop) {
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        term.loadAddon(webgl);
+      } catch {
+        /* keep the default canvas/DOM renderer */
+      }
     }
 
     const applyFit = () => {
+      if (!fitRef.current || !termRef.current) return;
       try {
-        fit.fit();
+        fitRef.current.fit();
       } catch {
         /* container not measurable yet */
       }
-      void api.resizeSession(session.id, term.cols, term.rows);
+      void api.resizeSession(session.id, termRef.current.cols, termRef.current.rows);
     };
     applyFit();
     term.focus();
 
-    const inputSub = term.onData((data) => {
+    inputSubRef.current = term.onData((data) => {
       void api.sendSessionInput(session.id, data);
     });
 
     const resizeObserver = new ResizeObserver(() => applyFit());
     resizeObserver.observe(container);
 
-    const stream = api.openSessionOutput(session.id, {
-      onData: (chunk) => term.write(chunk),
-      onEnd: () => term.write("\r\n\x1b[2m[session ended]\x1b[0m\r\n")
-    });
+    let stream = openStream();
+
+    function openStream() {
+      return api.openSessionOutput(session.id, {
+        onData: (chunk) => {
+          if (termRef.current) {
+            termRef.current.write(chunk);
+          }
+        },
+        onEnd: () => {
+          if (termRef.current) {
+            termRef.current.write("\r\n\x1b[2m[session ended]\x1b[0m\r\n");
+          }
+          // Reconnect if the view is still mounted and visible (e.g. browser
+          // throttled/killed the connection while in background).
+          if (!closingRef.current && !document.hidden && termRef.current) {
+            setTimeout(() => {
+              if (!closingRef.current && !document.hidden && termRef.current) {
+                stream = openStream();
+              }
+            }, 500);
+          }
+        }
+      });
+    }
+
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        requestAnimationFrame(() => {
+          applyFit();
+          termRef.current?.focus();
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
+      closingRef.current = true;
+      document.removeEventListener("visibilitychange", handleVisibility);
       stream.close();
-      inputSub.dispose();
+      inputSubRef.current?.dispose();
       resizeObserver.disconnect();
       term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
     };
-  }, [api, session.id]);
+  }, [api, session.id, isDesktop]);
 
   return <div ref={containerRef} className="h-full w-full overflow-hidden bg-[#0a0a0a] p-2" />;
 };

@@ -4,6 +4,8 @@ import { cn } from "../../lib/cn";
 import { EmptyState } from "./EmptyState";
 import { TerminalView } from "../terminal";
 import { FileBrowser } from "../files";
+import { LoopRunner } from "../loops";
+import { Gorila360Plans } from "../gorila360";
 import { useActiveTabId, useAppStore, useProjectTabs } from "../../store/app";
 
 /**
@@ -42,6 +44,10 @@ export const MainView: React.FC = () => {
       >
         {tab.type === "session" ? (
           <TerminalView session={tab.session} />
+        ) : tab.type === "loops" ? (
+          <LoopRunner />
+        ) : tab.type === "plans" ? (
+          <Gorila360Plans />
         ) : (
           <FileBrowser rootPath={currentProject.path} />
         )}

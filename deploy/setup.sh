@@ -226,7 +226,7 @@ Group=orquester
 WorkingDirectory=/opt/orquester/orquester
 Environment=NODE_ENV=production
 EnvironmentFile=-/opt/orquester/.env
-ExecStart=/usr/bin/node apps/daemon/src/cli.ts
+ExecStart=/opt/orquester/orquester/node_modules/.bin/tsx apps/daemon/src/cli.ts
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536

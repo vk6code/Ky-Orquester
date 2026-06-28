@@ -1,5 +1,5 @@
 import React from "react";
-import { Circle, FolderTree, X } from "lucide-react";
+import { Circle, FolderTree, Workflow, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { getRegistryIcon } from "../../icons";
 import { useActiveTabId, useAppStore, useProjectTabs } from "../../store/app";
@@ -23,6 +23,8 @@ export const TabStrip: React.FC = () => {
         const icon =
           tab.type === "session" ? (
             getRegistryIcon(tab.session.kind, tab.session.refId, 13)
+          ) : tab.type === "loops" ? (
+            <Workflow size={13} />
           ) : (
             <FolderTree size={13} />
           );

@@ -17,10 +17,19 @@ export function useViewportHeight(): number {
     window.visualViewport?.addEventListener("resize", update);
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
+    // iOS/Android often report a stale viewport height after returning from
+    // background; visibilitychange forces a recalculation.
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        requestAnimationFrame(update);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       window.visualViewport?.removeEventListener("resize", update);
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
 

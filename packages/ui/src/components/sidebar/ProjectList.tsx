@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Box, ChevronLeft, FolderPlus, PanelLeftClose, Plus } from "lucide-react";
+import { Box, ChevronLeft, FolderPlus, PanelLeftClose, Plus, Banana, Workflow } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Dropdown, DropdownItem, IconButton } from "../ui";
 import { NewItemInput } from "./NewItemInput";
@@ -15,6 +15,8 @@ export const ProjectList: React.FC = () => {
   const openProject = useAppStore((s) => s.openProject);
   const createProject = useAppStore((s) => s.createProject);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const openGorila360Plans = useAppStore((s) => s.openGorila360Plans);
+  const openLoopRunner = useAppStore((s) => s.openLoopRunner);
   const [creating, setCreating] = useState<null | "project" | "folder">(null);
 
   return (
@@ -82,6 +84,27 @@ export const ProjectList: React.FC = () => {
           </button>
         ))}
       </nav>
+
+      {currentProject && (
+        <div className="border-t border-neutral-800 p-2 space-y-2">
+          <button
+            type="button"
+            onClick={openLoopRunner}
+            className="flex w-full items-center gap-2 rounded-md bg-cyan-600/10 px-2 py-1.5 text-left text-sm font-medium text-cyan-300 transition-colors hover:bg-cyan-600/20"
+          >
+            <Workflow size={15} />
+            <span className="flex-1 truncate">Loop Runner</span>
+          </button>
+          <button
+            type="button"
+            onClick={openGorila360Plans}
+            className="flex w-full items-center gap-2 rounded-md bg-yellow-600/10 px-2 py-1.5 text-left text-sm font-medium text-yellow-500 transition-colors hover:bg-yellow-600/20"
+          >
+            <Banana size={15} />
+            <span className="flex-1 truncate">Gorila360 Plans</span>
+          </button>
+        </div>
+      )}
     </>
   );
 };

@@ -32,9 +32,8 @@ Environment=ORQUESTER_HTTP_PORT=57831
 # Cargar API keys desde archivo (opcional, no crítico si no existe)
 EnvironmentFile=-/opt/orquester/.env
 
-# Comando de inicio (usando nvm o node global)
-# Ajusta la ruta de node según tu instalación
-ExecStart=/usr/bin/node apps/daemon/src/cli.ts
+# Comando de inicio con tsx (TypeScript directo, noEmit=true en tsconfig)
+ExecStart=/opt/orquester/orquester/node_modules/.bin/tsx apps/daemon/src/cli.ts
 
 # Reinicio automático
 Restart=on-failure
@@ -47,12 +46,11 @@ LimitNOFILE=65536
 MemoryMax=2G
 CPUQuota=200%
 
-# Seguridad
+# Seguridad (relajada para que los agentes accedan a sus configs en home y workspaces)
 NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/opt/orquester/data /opt/orquester/logs
-PrivateTmp=true
+ProtectSystem=false
+ProtectHome=false
+PrivateTmp=false
 
 # Logs
 StandardOutput=journal

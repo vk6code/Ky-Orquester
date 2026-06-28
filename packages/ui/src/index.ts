@@ -50,6 +50,7 @@ export {
   useActiveTabId,
   type AppState,
   type FileTab,
+  type LoopTab,
   type ProjectTab
 } from "./store/app";
 export * from "./hooks";
@@ -62,6 +63,7 @@ export * from "./components/sidebar";
 export * from "./components/topbar";
 export * from "./components/main";
 export * from "./components/terminal";
+export * from "./components/loops";
 export * from "./components/servers";
 export * from "./components/files";
 export * from "./components/settings";
@@ -85,5 +87,12 @@ export type {
   AgentSummary,
   OpenTargetSummary,
   ProjectSummary,
-  WorkspaceSummary
+  WorkspaceSummary,
+  LoopRunRequest,
+  LoopRunResponse,
+  LoopTargetKind,
+  LoopTargetSpec,
+  Gorila360PlanSummary,
+  Gorila360LoopRunRequest,
+  Gorila360LoopRunResponse
 } from "./types";

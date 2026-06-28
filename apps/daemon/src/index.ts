@@ -22,6 +22,8 @@ import type {
 import { RegistryService } from "./registry";
 import { SessionError, SessionManager } from "./sessions";
 import { Broadcaster } from "./broadcaster";
+import { registerGorila360Routes } from "./gorila360";
+import { registerGorila360PlanRoutes } from "./gorila360-plans";
 import {
   type AppConfig,
   type ClientConfig,
@@ -550,6 +552,10 @@ function createServer(
     }
     return registry.openTarget(body.targetId, body.path);
   });
+
+  // Gorila360 worktree bridge + Rails loop runner + plans catalog
+  registerGorila360Routes(app, services);
+  registerGorila360PlanRoutes(app);
 
   // Sessions (PTYs)
   app.get<{ Querystring: { projectPath?: string } }>(

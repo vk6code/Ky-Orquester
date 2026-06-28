@@ -19,6 +19,7 @@ import type {
   UiConnection,
   WorkspaceSummary
 } from "../types";
+import type { Gorila360PlanSummary } from "../types";
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -53,6 +54,8 @@ let eventsUnsubscribe: (() => void) | null = null;
 let eventsGen = 0;
 /** Periodic health probe that detects a dropped/restarted transport. */
 let healthTimer: ReturnType<typeof setInterval> | null = null;
+/** Mobile visibility handler; removed on reconnect/sign-out. */
+let visibilityHandler: (() => void) | null = null;
 /** Guards against overlapping reconnect loops. */
 let reconnecting = false;
 
@@ -68,6 +71,10 @@ function closeEvents(): void {
   eventsGen += 1;
   eventsUnsubscribe?.();
   eventsUnsubscribe = null;
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+    visibilityHandler = null;
+  }
 }
 
 /** Host-provided connection wiring, set once via initConnections(). */
@@ -129,10 +136,26 @@ export interface FileTab {
   title: string;
 }
 
+/** A client-local Gorila360 plans tab. */
+export interface PlansTab {
+  id: string;
+  projectPath: string;
+  title: string;
+}
+
+/** A client-local generic loop runner tab. */
+export interface LoopTab {
+  id: string;
+  projectPath: string;
+  title: string;
+}
+
 /** A tab in the current project: a daemon session or a local tool tab. */
 export type ProjectTab =
   | { id: string; type: "session"; session: SessionSummary }
-  | { id: string; type: "files"; title: string };
+  | { id: string; type: "files"; title: string }
+  | { id: string; type: "plans"; title: string }
+  | { id: string; type: "loops"; title: string };
 
 function upsertSession(sessions: SessionSummary[], next: SessionSummary): SessionSummary[] {
   const index = sessions.findIndex((s) => s.id === next.id);
@@ -180,6 +203,10 @@ export interface AppState {
   sessions: SessionSummary[];
   /** Client-local tool tabs (file browser) per project path. */
   fileTabsByProject: Record<string, FileTab[]>;
+  /** Client-local Gorila360 plans tabs per project path. */
+  plansTabsByProject: Record<string, PlansTab[]>;
+  /** Client-local generic loop runner tabs per project path. */
+  loopTabsByProject: Record<string, LoopTab[]>;
   /** Client-local active tab id per project path (session or file tab). */
   activeTabByProject: Record<string, string | null>;
 
@@ -223,6 +250,8 @@ export interface AppState {
   updateAgent: (id: string) => Promise<void>;
   openTab: (kind: RegistryKind, refId: string, title?: string) => Promise<void>;
   openFileBrowser: () => void;
+  openGorila360Plans: () => void;
+  openLoopRunner: () => void;
   closeTab: (id: string) => Promise<void>;
   activateTab: (id: string) => void;
 
@@ -250,6 +279,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   projectsLoading: false,
   sessions: [],
   fileTabsByProject: {},
+  plansTabsByProject: {},
+  loopTabsByProject: {},
   activeTabByProject: {},
 
   setApi: (api) => set({ api }),
@@ -302,8 +333,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
+    // Load data first; any 401 will sign out and stop here.
+    try {
+      await Promise.all([get().loadWorkspaces(), get().loadSessions(), get().loadRegistry()]);
+    } catch {
+      // signOut is called by the loader that received 401.
+      return;
+    }
+
+    // Auth is valid: persist the hash and mark connected.
+    if (info?.authRequired && active.connection.password) {
+      storeHash(active.connection.endpoint, active.connection.password);
+    }
     set({ connectionStatus: "connected", reconnectAttempt: 0, authPrompt: null });
-    await Promise.all([get().loadWorkspaces(), get().loadSessions(), get().loadRegistry()]);
 
     // Live event sync. The stream ending unexpectedly (e.g. the transport was
     // restarted) is the primary disconnect signal.
@@ -326,19 +368,31 @@ export const useAppStore = create<AppState>((set, get) => ({
         void current.health().catch(() => get().handleDisconnect());
       }
     }, 4000);
+
+    // Mobile browsers kill background connections; try to heal the event stream
+    // when the page becomes visible again, but only if we're not waiting for auth.
+    visibilityHandler = () => {
+      const currentApi = get().api;
+      if (!document.hidden && get().authPrompt === null && eventsUnsubscribe === null && currentApi) {
+        void get().establish(currentApi);
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
   },
 
   handleDisconnect: () => {
     stopHealthProbe();
-    if (reconnecting || get().api === null) {
+    // If the user is already being prompted for a password, don't auto-reconnect
+    // with the stale/invalid credential; that would create an infinite 401 loop.
+    if (reconnecting || get().api === null || get().authPrompt !== null) {
       return;
     }
     reconnecting = true;
 
     const loop = async () => {
-      for (let attempt = 1; ; attempt += 1) {
+      for (let attempt = 1; attempt <= 30; attempt += 1) {
         const current = get().api;
-        if (!current) {
+        if (!current || get().authPrompt !== null) {
           break;
         }
         set({ connectionStatus: "connecting", reconnectAttempt: attempt });
@@ -346,7 +400,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           await current.health();
           // Daemon is back: rebuild the client so terminals + event streams
           // re-subscribe to the (intact) sessions, then re-establish.
-          const fresh = apiWithPassword(current, current.connection.password ?? "");
+          const password = current.connection.password || loadStoredHash(current.connection.endpoint);
+          if (!password) {
+            get().signOut();
+            break;
+          }
+          const fresh = apiWithPassword(current, password);
           set({ api: fresh });
           await get().establish(fresh);
           break;
@@ -427,10 +486,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!api || !salt) {
       return;
     }
-    // Derive the same bcrypt hash the daemon stores; persist it (never the
-    // plaintext) and use it as the bearer.
+    // Derive the same bcrypt hash the daemon stores and use it as the bearer.
+    // Do NOT persist it yet; establish() will store it only after validation.
     const hash = deriveAuthHash(password, salt);
-    storeHash(api.connection.endpoint, hash);
     set({ api: apiWithPassword(api, hash), authPrompt: null });
     await get().connect();
   },
@@ -467,7 +525,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       currentProject: null,
       workspaces: [],
       projects: [],
-      sessions: []
+      sessions: [],
+      fileTabsByProject: {},
+      plansTabsByProject: {},
+      loopTabsByProject: {},
+      activeTabByProject: {}
     });
     await get().connect();
   },
@@ -505,13 +567,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ workspaces: await workspaceService.list(api) });
     } catch (error) {
-      // A wrong/stale token surfaces here — clear it and re-prompt.
+      // A wrong/stale token surfaces here — sign out completely and re-prompt.
       if (error instanceof ApiError && error.status === 401) {
-        clearStoredHash(api.connection.endpoint);
-        set({ connectionStatus: "error", authPrompt: { connectionId: api.connection.id } });
+        get().signOut();
       } else {
         console.error("[orquester] failed to load workspaces", error);
       }
+      throw error;
     } finally {
       set({ workspacesLoading: false });
     }
@@ -563,7 +625,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   openProject: (project) =>
     set((state) => {
       const active = state.activeTabByProject[project.path];
-      const fallback = firstTabId(state.sessions, state.fileTabsByProject, project.path);
+      const fallback = firstTabId(
+        state.sessions,
+        state.plansTabsByProject,
+        state.loopTabsByProject,
+        state.fileTabsByProject,
+        project.path
+      );
       return {
         currentProject: project,
         // Opening a project reveals the main view — close the mobile drawer.
@@ -583,6 +651,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ sessions: await api.listSessions() });
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        get().signOut();
+        throw error;
+      }
       console.error("[orquester] failed to load sessions", error);
     }
   },
@@ -594,7 +666,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     try {
       set({ registry: await api.listRegistry() });
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        get().signOut();
+        throw error;
+      }
       /* keep current */
     }
   },
@@ -645,10 +721,57 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }),
 
+  openGorila360Plans: () =>
+    set((state) => {
+      const project = state.currentProject;
+      if (!project) {
+        return state;
+      }
+      const existing = state.plansTabsByProject[project.path]?.[0];
+      if (existing) {
+        return { activeTabByProject: { ...state.activeTabByProject, [project.path]: existing.id } };
+      }
+      const tab: PlansTab = { id: crypto.randomUUID(), projectPath: project.path, title: "Gorila360" };
+      return {
+        plansTabsByProject: {
+          ...state.plansTabsByProject,
+          [project.path]: [tab]
+        },
+        activeTabByProject: { ...state.activeTabByProject, [project.path]: tab.id }
+      };
+    }),
+
+  openLoopRunner: () =>
+    set((state) => {
+      const project = state.currentProject;
+      if (!project) {
+        return state;
+      }
+      const existing = state.loopTabsByProject[project.path]?.[0];
+      if (existing) {
+        return { activeTabByProject: { ...state.activeTabByProject, [project.path]: existing.id } };
+      }
+      const tab: LoopTab = { id: crypto.randomUUID(), projectPath: project.path, title: "Loop Runner" };
+      return {
+        loopTabsByProject: {
+          ...state.loopTabsByProject,
+          [project.path]: [tab]
+        },
+        activeTabByProject: { ...state.activeTabByProject, [project.path]: tab.id }
+      };
+    }),
+
   closeTab: async (id) => {
     const api = get().api;
     const isSession = get().sessions.some((s) => s.id === id);
-    set((state) => (isSession ? removeSession(state, id) : removeFileTab(state, id)));
+    const isPlans = Object.values(get().plansTabsByProject).some((tabs) => tabs.some((t) => t.id === id));
+    const isLoops = Object.values(get().loopTabsByProject).some((tabs) => tabs.some((t) => t.id === id));
+    set((state) => {
+      if (isSession) return removeSession(state, id);
+      if (isPlans) return removePlansTab(state, id);
+      if (isLoops) return removeLoopTab(state, id);
+      return removeFileTab(state, id);
+    });
     if (isSession) {
       await api?.closeSession(id).catch(() => undefined);
     }
@@ -682,14 +805,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }));
 
-/** First remaining tab id for a project (session preferred, then file tab). */
+/** First remaining tab id for a project (session preferred, then loop/plans/files). */
 function firstTabId(
   sessions: SessionSummary[],
+  plansTabs: Record<string, PlansTab[]>,
+  loopTabs: Record<string, LoopTab[]>,
   fileTabs: Record<string, FileTab[]>,
   path: string
 ): string | null {
   return (
-    sessions.find((s) => s.projectPath === path)?.id ?? fileTabs[path]?.[0]?.id ?? null
+    sessions.find((s) => s.projectPath === path)?.id ??
+    plansTabs[path]?.[0]?.id ??
+    loopTabs[path]?.[0]?.id ??
+    fileTabs[path]?.[0]?.id ??
+    null
   );
 }
 
@@ -697,12 +826,14 @@ function reassignActive(
   activeTabByProject: Record<string, string | null>,
   removedId: string,
   sessions: SessionSummary[],
+  plansTabs: Record<string, PlansTab[]>,
+  loopTabs: Record<string, LoopTab[]>,
   fileTabs: Record<string, FileTab[]>
 ): Record<string, string | null> {
   const next = { ...activeTabByProject };
   for (const [path, activeId] of Object.entries(next)) {
     if (activeId === removedId) {
-      next[path] = firstTabId(sessions, fileTabs, path);
+      next[path] = firstTabId(sessions, plansTabs, loopTabs, fileTabs, path);
     }
   }
   return next;
@@ -712,7 +843,14 @@ function removeSession(state: AppState, id: string): Partial<AppState> {
   const sessions = state.sessions.filter((s) => s.id !== id);
   return {
     sessions,
-    activeTabByProject: reassignActive(state.activeTabByProject, id, sessions, state.fileTabsByProject)
+    activeTabByProject: reassignActive(
+      state.activeTabByProject,
+      id,
+      sessions,
+      state.plansTabsByProject,
+      state.loopTabsByProject,
+      state.fileTabsByProject
+    )
   };
 }
 
@@ -723,14 +861,59 @@ function removeFileTab(state: AppState, id: string): Partial<AppState> {
   }
   return {
     fileTabsByProject,
-    activeTabByProject: reassignActive(state.activeTabByProject, id, state.sessions, fileTabsByProject)
+    activeTabByProject: reassignActive(
+      state.activeTabByProject,
+      id,
+      state.sessions,
+      state.plansTabsByProject,
+      state.loopTabsByProject,
+      fileTabsByProject
+    )
   };
 }
 
-/** Combined tabs (sessions + file tabs) of the currently open project. */
+function removePlansTab(state: AppState, id: string): Partial<AppState> {
+  const plansTabsByProject: Record<string, PlansTab[]> = {};
+  for (const [path, tabs] of Object.entries(state.plansTabsByProject)) {
+    plansTabsByProject[path] = tabs.filter((t) => t.id !== id);
+  }
+  return {
+    plansTabsByProject,
+    activeTabByProject: reassignActive(
+      state.activeTabByProject,
+      id,
+      state.sessions,
+      plansTabsByProject,
+      state.loopTabsByProject,
+      state.fileTabsByProject
+    )
+  };
+}
+
+function removeLoopTab(state: AppState, id: string): Partial<AppState> {
+  const loopTabsByProject: Record<string, LoopTab[]> = {};
+  for (const [path, tabs] of Object.entries(state.loopTabsByProject)) {
+    loopTabsByProject[path] = tabs.filter((t) => t.id !== id);
+  }
+  return {
+    loopTabsByProject,
+    activeTabByProject: reassignActive(
+      state.activeTabByProject,
+      id,
+      state.sessions,
+      state.plansTabsByProject,
+      loopTabsByProject,
+      state.fileTabsByProject
+    )
+  };
+}
+
+/** Combined tabs (sessions + plans + loop runner + file tabs) of the currently open project. */
 export function useProjectTabs(): ProjectTab[] {
   const sessions = useAppStore((s) => s.sessions);
   const fileTabsByProject = useAppStore((s) => s.fileTabsByProject);
+  const plansTabsByProject = useAppStore((s) => s.plansTabsByProject);
+  const loopTabsByProject = useAppStore((s) => s.loopTabsByProject);
   const project = useAppStore((s) => s.currentProject);
   return useMemo(() => {
     if (!project) {
@@ -739,13 +922,23 @@ export function useProjectTabs(): ProjectTab[] {
     const sessionTabs: ProjectTab[] = sessions
       .filter((s) => s.projectPath === project.path)
       .map((session) => ({ id: session.id, type: "session", session }));
+    const plansTabs: ProjectTab[] = (plansTabsByProject[project.path] ?? []).map((tab) => ({
+      id: tab.id,
+      type: "plans",
+      title: tab.title
+    }));
+    const loopTabs: ProjectTab[] = (loopTabsByProject[project.path] ?? []).map((tab) => ({
+      id: tab.id,
+      type: "loops",
+      title: tab.title
+    }));
     const fileTabs: ProjectTab[] = (fileTabsByProject[project.path] ?? []).map((tab) => ({
       id: tab.id,
       type: "files",
       title: tab.title
     }));
-    return [...sessionTabs, ...fileTabs];
-  }, [sessions, fileTabsByProject, project]);
+    return [...sessionTabs, ...loopTabs, ...plansTabs, ...fileTabs];
+  }, [sessions, fileTabsByProject, plansTabsByProject, loopTabsByProject, project]);
 }
 
 export function useActiveTabId(): string | null {
