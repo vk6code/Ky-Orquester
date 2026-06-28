@@ -1,0 +1,4 @@
+# Deploy files
+.env
+.env.local
+*.log

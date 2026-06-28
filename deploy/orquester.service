@@ -1,0 +1,63 @@
+# Orquester - Systemd Service File
+#
+# Ubicación: /etc/systemd/system/orquester.service
+#
+# Uso:
+#   sudo cp deploy/orquester.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable orquester
+#   sudo systemctl start orquester
+#   sudo systemctl status orquester
+
+[Unit]
+Description=Orquester Daemon - AI Coding Agent Orchestrator
+Documentation=https://github.com/vk6code/Ky-Orquester
+After=network.target
+
+[Service]
+Type=simple
+User=orquester
+Group=orquester
+
+# Directorio de trabajo
+WorkingDirectory=/opt/orquester/orquester
+
+# Variables de entorno
+Environment=NODE_ENV=production
+Environment=ORQUESTER_APPDIR=/opt/orquester/data
+Environment=ORQUESTER_HTTP_ENABLED=true
+Environment=ORQUESTER_HTTP_HOST=0.0.0.0
+Environment=ORQUESTER_HTTP_PORT=57831
+
+# Cargar API keys desde archivo (opcional, no crítico si no existe)
+EnvironmentFile=-/opt/orquester/.env
+
+# Comando de inicio (usando nvm o node global)
+# Ajusta la ruta de node según tu instalación
+ExecStart=/usr/bin/node apps/daemon/src/cli.ts
+
+# Reinicio automático
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Límites de recursos
+LimitNOFILE=65536
+MemoryMax=2G
+CPUQuota=200%
+
+# Seguridad
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/orquester/data /opt/orquester/logs
+PrivateTmp=true
+
+# Logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orquester
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,43 @@
+# Orquester - Docker Compose para VPS Linux
+#
+# Uso:
+#   cp .env.example .env   # editar con tus valores
+#   docker compose up -d
+#   docker compose logs -f
+
+services:
+  orquester:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: orquester
+    restart: unless-stopped
+    ports:
+      - "${ORQUESTER_PORT:-57831}:57831"
+    environment:
+      - NODE_ENV=production
+      - ORQUESTER_APPDIR=/opt/orquester/data
+      - ORQUESTER_HTTP_ENABLED=${ORQUESTER_HTTP_ENABLED:-true}
+      - ORQUESTER_HTTP_HOST=${ORQUESTER_HTTP_HOST:-0.0.0.0}
+      - ORQUESTER_HTTP_PORT=57831
+      - ORQUESTER_HTTP_PASSWORD=${ORQUESTER_HTTP_PASSWORD}
+      # API Keys de agentes
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - KIMI_API_KEY=${KIMI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+    volumes:
+      # Persistir datos del daemon (config, sesiones, logs)
+      - orquester-data:/opt/orquester/data
+      # Mount opcional de proyectos para workspaces
+      - ${PROJECTS_DIR:-./projects}:/projects:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:57831/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  orquester-data:
+    driver: local
