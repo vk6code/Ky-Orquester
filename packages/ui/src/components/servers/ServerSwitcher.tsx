@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, Plus, Server, Trash2 } from "lucide-react";
+import { Check, Pencil, Plus, Server, Trash2 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Button, Dropdown, DropdownItem, DropdownLabel, DropdownSeparator, Input } from "../ui";
 import { useAppStore } from "../../store/app";
@@ -19,14 +19,24 @@ export const ServerSwitcher: React.FC = () => {
   const status = useAppStore((s) => s.connectionStatus);
   const select = useAppStore((s) => s.selectConnection);
   const removeRemote = useAppStore((s) => s.removeRemote);
+  const renameRemote = useAppStore((s) => s.renameRemote);
   const addRemote = useAppStore((s) => s.addRemote);
 
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [password, setPassword] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
 
   const active = connections.find((c) => c.id === activeId);
+
+  const submitRename = async () => {
+    if (editingId) {
+      await renameRemote(editingId, editName);
+    }
+    setEditingId(null);
+  };
 
   const submit = async () => {
     if (!url.trim()) {
@@ -52,33 +62,67 @@ export const ServerSwitcher: React.FC = () => {
     <div className="border-t border-neutral-800 p-2">
       <Dropdown trigger={trigger} width="w-64">
         <DropdownLabel>Servers</DropdownLabel>
-        {connections.map((connection) => (
-          <div key={connection.id} className="group flex items-center">
-            <DropdownItem
-              className="flex-1"
-              icon={
-                connection.id === activeId ? (
-                  <Check size={14} />
-                ) : (
-                  <span className={cn("h-2 w-2 rounded-full", STATUS_COLOR[connection.status])} />
-                )
-              }
-              onClick={() => void select(connection.id)}
-            >
-              <span className="truncate">{connection.name}</span>
-            </DropdownItem>
-            {connection.kind === "remote" && (
-              <button
-                type="button"
-                aria-label="Remove server"
-                className="mr-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-red-400 group-hover:flex"
-                onClick={() => void removeRemote(connection.id)}
+        {connections.map((connection) =>
+          editingId === connection.id ? (
+            <div key={connection.id} className="p-1.5" onClick={(e) => e.stopPropagation()}>
+              <Input
+                autoFocus
+                value={editName}
+                placeholder="Server name"
+                onChange={(e) => setEditName(e.target.value)}
+                onBlur={() => void submitRename()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void submitRename();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setEditingId(null);
+                  }
+                }}
+              />
+            </div>
+          ) : (
+            <div key={connection.id} className="group flex items-center">
+              <DropdownItem
+                className="flex-1"
+                icon={
+                  connection.id === activeId ? (
+                    <Check size={14} />
+                  ) : (
+                    <span className={cn("h-2 w-2 rounded-full", STATUS_COLOR[connection.status])} />
+                  )
+                }
+                onClick={() => void select(connection.id)}
               >
-                <Trash2 size={13} />
-              </button>
-            )}
-          </div>
-        ))}
+                <span className="truncate">{connection.name}</span>
+              </DropdownItem>
+              {connection.kind === "remote" && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Rename server"
+                    className="hidden h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 group-hover:flex"
+                    onClick={() => {
+                      setEditName(connection.name);
+                      setEditingId(connection.id);
+                    }}
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Remove server"
+                    className="mr-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-red-400 group-hover:flex"
+                    onClick={() => void removeRemote(connection.id)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </>
+              )}
+            </div>
+          )
+        )}
 
         <DropdownSeparator />
 

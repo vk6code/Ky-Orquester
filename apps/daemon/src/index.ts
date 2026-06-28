@@ -30,17 +30,21 @@ import {
   type ConfigVars,
   type DaemonConfig,
   type DaemonPaths,
+  type LabelsConfig,
   type RemoteConnectionConfig,
   type RemotesConfig,
   appConfigPath,
   createDefaultAppConfig,
   createDefaultClientConfig,
   createDefaultDaemonConfig,
+  createDefaultLabelsConfig,
   createDefaultRemotesConfig,
   dailyLogFile,
   expandVars,
+  labelsConfigPath,
   parseAppConfig,
   parseDaemonConfig,
+  parseLabelsConfig,
   parseRemotesConfig,
   remotesConfigPath,
   resolveDaemonPaths
@@ -65,6 +69,7 @@ interface ResolvedPaths {
   /** app.json + remotes.json live under <appdir>/app and are shared by clients. */
   appConfigFile: string;
   remotesFile: string;
+  labelsFile: string;
   workspacesDir: string;
   logsDir: string;
   vars: ConfigVars;
@@ -107,6 +112,7 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<Run
     configPath: paths.configPath,
     appConfigFile: appConfigPath(paths.baseDir),
     remotesFile: remotesConfigPath(paths.baseDir),
+    labelsFile: labelsConfigPath(paths.baseDir),
     workspacesDir: expandVars(config.workspacesDir, paths.vars),
     logsDir: expandVars(config.logsDir, paths.vars),
     vars: paths.vars
@@ -475,6 +481,26 @@ function createServer(
     }
   });
 
+  // Display-only labels (labels.json) for workspaces/projects, keyed by path.
+  // Folders on disk keep their real names; these only override what the UI shows.
+  app.get(
+    "/api/config/labels",
+    async (): Promise<Record<string, string>> => (await readLabelsFile(resolved.labelsFile)).labels
+  );
+
+  app.put("/api/config/labels", async (request, reply): Promise<Record<string, string> | void> => {
+    try {
+      const parsed = parseLabelsConfig({
+        version: 1,
+        labels: typeof request.body === "object" && request.body !== null ? request.body : {}
+      });
+      await writeJsonFile(resolved.labelsFile, parsed);
+      return parsed.labels;
+    } catch {
+      return reply.code(400).send({ code: "INVALID_CONFIG", message: "Invalid labels config." });
+    }
+  });
+
   // File browser: list a directory.
   app.get<{ Querystring: { path?: string } }>(
     "/api/fs",
@@ -832,6 +858,14 @@ async function readRemotesFile(file: string): Promise<RemotesConfig> {
     return parseRemotesConfig(JSON.parse(await readFile(file, "utf8")));
   } catch {
     return createDefaultRemotesConfig();
+  }
+}
+
+async function readLabelsFile(file: string): Promise<LabelsConfig> {
+  try {
+    return parseLabelsConfig(JSON.parse(await readFile(file, "utf8")));
+  } catch {
+    return createDefaultLabelsConfig();
   }
 }
 

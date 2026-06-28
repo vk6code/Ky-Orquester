@@ -5,6 +5,7 @@ import {
   FolderPlus,
   FolderSymlink,
   PanelLeftClose,
+  Pencil,
   Plus,
   Banana,
   Workflow
@@ -22,14 +23,20 @@ export const ProjectList: React.FC = () => {
   const currentWorkspace = useAppStore((s) => s.currentWorkspace);
   const currentProject = useAppStore((s) => s.currentProject);
   const projects = useAppStore((s) => s.projects);
+  const workspaces = useAppStore((s) => s.workspaces);
+  const labels = useAppStore((s) => s.labels);
   const loading = useAppStore((s) => s.projectsLoading);
   const closeWorkspace = useAppStore((s) => s.closeWorkspace);
   const openProject = useAppStore((s) => s.openProject);
   const createProject = useAppStore((s) => s.createProject);
+  const setLabel = useAppStore((s) => s.setLabel);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const openGorila360Plans = useAppStore((s) => s.openGorila360Plans);
   const openLoopRunner = useAppStore((s) => s.openLoopRunner);
   const [creating, setCreating] = useState<null | "project" | "folder">(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  // The header shows the current workspace; resolve its display label by path.
+  const workspacePath = workspaces.find((w) => w.name === currentWorkspace)?.path;
   // Linking an external server folder as a project (symlink under the workspace).
   const [linkPicking, setLinkPicking] = useState(false);
   const [linkPath, setLinkPath] = useState<string | null>(null);
@@ -44,7 +51,7 @@ export const ProjectList: React.FC = () => {
           <ChevronLeft size={16} />
         </IconButton>
         <span className="flex-1 truncate text-sm font-medium text-neutral-100">
-          {currentWorkspace}
+          {(workspacePath && labels[workspacePath]) || currentWorkspace}
         </span>
         <Dropdown
           trigger={
@@ -98,22 +105,44 @@ export const ProjectList: React.FC = () => {
         {!loading && projects.length === 0 && !creating && (
           <p className="px-2 py-2 text-xs text-neutral-600">No projects yet</p>
         )}
-        {projects.map((project) => (
-          <button
-            key={project.path}
-            type="button"
-            onClick={() => openProject(project)}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-              project.path === currentProject?.path
-                ? "bg-neutral-800 text-neutral-100"
-                : "text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100"
-            )}
-          >
-            <Box size={15} className="text-neutral-500" />
-            <span className="flex-1 truncate">{project.name}</span>
-          </button>
-        ))}
+        {projects.map((project) =>
+          editing === project.path ? (
+            <NewItemInput
+              key={project.path}
+              placeholder="display-name"
+              defaultValue={labels[project.path] ?? project.name}
+              onCancel={() => setEditing(null)}
+              onSubmit={(name) => {
+                setEditing(null);
+                void setLabel(project.path, name);
+              }}
+            />
+          ) : (
+            <div key={project.path} className="group flex items-center">
+              <button
+                type="button"
+                onClick={() => openProject(project)}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                  project.path === currentProject?.path
+                    ? "bg-neutral-800 text-neutral-100"
+                    : "text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100"
+                )}
+              >
+                <Box size={15} className="text-neutral-500" />
+                <span className="flex-1 truncate">{labels[project.path] ?? project.name}</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Rename project"
+                className="ml-0.5 hidden h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 group-hover:flex"
+                onClick={() => setEditing(project.path)}
+              >
+                <Pencil size={13} />
+              </button>
+            </div>
+          )
+        )}
       </nav>
 
       {currentProject && (

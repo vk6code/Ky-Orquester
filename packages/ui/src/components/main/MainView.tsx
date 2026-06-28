@@ -44,7 +44,7 @@ export const MainView: React.FC = () => {
         className={cn("h-full w-full", tab.id === activeId ? "block" : "hidden")}
       >
         {tab.type === "session" ? (
-          <TerminalView session={tab.session} />
+          <TerminalView session={tab.session} active={tab.id === activeId} />
         ) : tab.type === "agent-launcher" ? (
           <AgentWorkspace />
         ) : tab.type === "loops" ? (

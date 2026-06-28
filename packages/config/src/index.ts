@@ -84,6 +84,10 @@ export function remotesConfigPath(baseDir: string): string {
   return joinPath(appConfigDir(baseDir), "remotes.json");
 }
 
+export function labelsConfigPath(baseDir: string): string {
+  return joinPath(appConfigDir(baseDir), "labels.json");
+}
+
 export function daemonConfigPath(baseDir: string): string {
   return joinPath(daemonConfigDir(baseDir), "daemon.json");
 }
@@ -259,6 +263,24 @@ export function createDefaultRemotesConfig(): RemotesConfig {
 
 export function parseRemotesConfig(value: unknown): RemotesConfig {
   return remotesConfigSchema.parse(value);
+}
+
+// labels.json (display-only aliases for workspaces/projects, keyed by absolute
+// filesystem path; the folders on disk keep their real names)
+
+export const labelsConfigSchema = z.object({
+  version: z.literal(1).default(1),
+  labels: z.record(z.string(), z.string()).default({})
+});
+
+export type LabelsConfig = z.infer<typeof labelsConfigSchema>;
+
+export function createDefaultLabelsConfig(): LabelsConfig {
+  return labelsConfigSchema.parse({ labels: {} });
+}
+
+export function parseLabelsConfig(value: unknown): LabelsConfig {
+  return labelsConfigSchema.parse(value);
 }
 
 // ClientConfig — what the daemon reports about how to reach itself.}

@@ -140,6 +140,15 @@ export class ApiClient {
     return this.send("PUT", "/api/config/remotes", { body: remotes });
   }
 
+  // Display-only labels for workspaces/projects, keyed by absolute path.
+  listLabels(signal?: AbortSignal): Promise<Record<string, string>> {
+    return this.send("GET", "/api/config/labels", { signal });
+  }
+
+  saveLabels(labels: Record<string, string>): Promise<Record<string, string>> {
+    return this.send("PUT", "/api/config/labels", { body: labels });
+  }
+
   // Workspaces & projects (filesystem-backed)
 
   listWorkspaces(signal?: AbortSignal): Promise<WorkspaceSummary[]> {

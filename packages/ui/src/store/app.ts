@@ -207,6 +207,8 @@ export interface AppState {
   workspacesLoading: boolean;
   projects: ProjectSummary[];
   projectsLoading: boolean;
+  /** Display-only name overrides for workspaces/projects, keyed by abs path. */
+  labels: Record<string, string>;
 
   /** All daemon sessions; a project's sessions are its tabs. */
   sessions: SessionSummary[];
@@ -233,6 +235,7 @@ export interface AppState {
   selectConnection: (id: string) => Promise<void>;
   addRemote: (input: { name: string; baseUrl: string; password?: string }) => Promise<string>;
   removeRemote: (id: string) => Promise<void>;
+  renameRemote: (id: string, name: string) => Promise<void>;
   loadRemotes: () => Promise<void>;
 
   // app config + settings
@@ -254,6 +257,11 @@ export interface AppState {
   loadProjects: () => Promise<void>;
   createProject: (name: string, linkPath?: string) => Promise<void>;
   openProject: (project: ProjectSummary) => void;
+
+  /** Load display-name overrides for the active daemon. */
+  loadLabels: () => Promise<void>;
+  /** Set (or clear, when blank) a display name for a workspace/project path. */
+  setLabel: (path: string, name: string) => Promise<void>;
 
   loadSessions: () => Promise<void>;
   loadRegistry: () => Promise<void>;
@@ -296,6 +304,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   workspacesLoading: false,
   projects: [],
   projectsLoading: false,
+  labels: {},
   sessions: [],
   fileTabsByProject: {},
   plansTabsByProject: {},
@@ -355,7 +364,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     // Load data first; any 401 will sign out and stop here.
     try {
-      await Promise.all([get().loadWorkspaces(), get().loadSessions(), get().loadRegistry()]);
+      await Promise.all([
+        get().loadWorkspaces(),
+        get().loadSessions(),
+        get().loadRegistry(),
+        get().loadLabels()
+      ]);
     } catch {
       // signOut is called by the loader that received 401.
       return;
@@ -545,6 +559,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       currentProject: null,
       workspaces: [],
       projects: [],
+      labels: {},
       sessions: [],
       fileTabsByProject: {},
       plansTabsByProject: {},
@@ -577,6 +592,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().activeConnectionId === id && setup) {
       await get().selectConnection(setup.localConnection.id);
     }
+  },
+
+  renameRemote: async (id, name) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return;
+    }
+    const connections = get().connections.map((c) =>
+      c.id === id && c.kind === "remote" ? { ...c, name: trimmed } : c
+    );
+    set({ connections });
+    await persistRemotes(connections);
   },
 
   loadWorkspaces: async () => {
@@ -664,6 +691,34 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       };
     }),
+
+  loadLabels: async () => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    try {
+      set({ labels: await api.listLabels() });
+    } catch {
+      set({ labels: {} });
+    }
+  },
+
+  setLabel: async (path, name) => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    const trimmed = name.trim();
+    const labels = { ...get().labels };
+    if (trimmed) {
+      labels[path] = trimmed;
+    } else {
+      delete labels[path];
+    }
+    set({ labels });
+    await api.saveLabels(labels).catch(() => undefined);
+  },
 
   loadSessions: async () => {
     const api = get().api;

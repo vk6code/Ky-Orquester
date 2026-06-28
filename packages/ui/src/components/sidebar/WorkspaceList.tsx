@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Folder, FolderPlus, PanelLeftClose } from "lucide-react";
+import { Folder, FolderPlus, PanelLeftClose, Pencil } from "lucide-react";
 import { IconButton } from "../ui";
 import { NewItemInput } from "./NewItemInput";
 import { useAppStore } from "../../store/app";
@@ -7,11 +7,14 @@ import { useAppStore } from "../../store/app";
 /** Root sidebar view: the list of workspace folders. */
 export const WorkspaceList: React.FC = () => {
   const workspaces = useAppStore((s) => s.workspaces);
+  const labels = useAppStore((s) => s.labels);
   const loading = useAppStore((s) => s.workspacesLoading);
   const openWorkspace = useAppStore((s) => s.openWorkspace);
   const createWorkspace = useAppStore((s) => s.createWorkspace);
+  const setLabel = useAppStore((s) => s.setLabel);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
 
   return (
     <>
@@ -45,18 +48,40 @@ export const WorkspaceList: React.FC = () => {
         {!loading && workspaces.length === 0 && !creating && (
           <p className="px-2 py-2 text-xs text-neutral-600">No workspaces yet</p>
         )}
-        {workspaces.map((workspace) => (
-          <button
-            key={workspace.path}
-            type="button"
-            onClick={() => void openWorkspace(workspace.name)}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
-          >
-            <Folder size={15} className="text-neutral-500" />
-            <span className="flex-1 truncate">{workspace.name}</span>
-            <span className="text-xs text-neutral-600">{workspace.projectCount}</span>
-          </button>
-        ))}
+        {workspaces.map((workspace) =>
+          editing === workspace.path ? (
+            <NewItemInput
+              key={workspace.path}
+              placeholder="display-name"
+              defaultValue={labels[workspace.path] ?? workspace.name}
+              onCancel={() => setEditing(null)}
+              onSubmit={(name) => {
+                setEditing(null);
+                void setLabel(workspace.path, name);
+              }}
+            />
+          ) : (
+            <div key={workspace.path} className="group flex items-center">
+              <button
+                type="button"
+                onClick={() => void openWorkspace(workspace.name)}
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
+              >
+                <Folder size={15} className="text-neutral-500" />
+                <span className="flex-1 truncate">{labels[workspace.path] ?? workspace.name}</span>
+                <span className="text-xs text-neutral-600">{workspace.projectCount}</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Rename workspace"
+                className="ml-0.5 hidden h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 group-hover:flex"
+                onClick={() => setEditing(workspace.path)}
+              >
+                <Pencil size={13} />
+              </button>
+            </div>
+          )
+        )}
       </nav>
     </>
   );

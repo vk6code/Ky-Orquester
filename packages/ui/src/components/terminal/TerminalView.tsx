@@ -49,7 +49,10 @@ const THEME: ITheme = {
  *   don't lose live output after switching apps.
  * - A resize/fit is forced when the page becomes visible again.
  */
-export const TerminalView: React.FC<{ session: SessionSummary }> = ({ session }) => {
+export const TerminalView: React.FC<{ session: SessionSummary; active?: boolean }> = ({
+  session,
+  active = true
+}) => {
   const api = useApi();
   const isDesktop = useIsDesktop();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -57,6 +60,9 @@ export const TerminalView: React.FC<{ session: SessionSummary }> = ({ session })
   const fitRef = useRef<FitAddon | null>(null);
   const inputSubRef = useRef<{ dispose: () => void } | null>(null);
   const closingRef = useRef(false);
+  // Set by the mount effect so the visibility effect below can re-fit and force
+  // a repaint without re-running the (expensive) terminal setup.
+  const redrawRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -111,6 +117,18 @@ export const TerminalView: React.FC<{ session: SessionSummary }> = ({ session })
     };
     applyFit();
     term.focus();
+
+    // Re-fit and force a full repaint. xterm keeps a stale frame while its
+    // container is display:none (especially with the WebGL renderer), so when a
+    // hidden tab is shown again we must explicitly redraw — a same-size fit()
+    // alone does not trigger one.
+    redrawRef.current = () => {
+      const t = termRef.current;
+      if (!t) return;
+      applyFit();
+      t.refresh(0, t.rows - 1);
+      t.focus();
+    };
 
     inputSubRef.current = term.onData((data) => {
       void api.sendSessionInput(session.id, data);
@@ -178,8 +196,19 @@ export const TerminalView: React.FC<{ session: SessionSummary }> = ({ session })
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      redrawRef.current = null;
     };
   }, [api, session.id, isDesktop]);
+
+  // When this terminal's tab becomes the active one it transitions from
+  // display:none to visible. Force a re-fit + repaint on the next frame (once
+  // the container is actually laid out) so the view isn't left showing a stale
+  // frame after switching tabs.
+  useEffect(() => {
+    if (!active) return;
+    const raf = requestAnimationFrame(() => redrawRef.current?.());
+    return () => cancelAnimationFrame(raf);
+  }, [active]);
 
   return <div ref={containerRef} className="h-full w-full overflow-hidden bg-[#0a0a0a] p-2" />;
 };
