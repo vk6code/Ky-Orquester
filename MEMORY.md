@@ -154,6 +154,26 @@ para que un solo agente abarque varios roots.
   render en `MainView`, tab client-local `agent-launcher` en el store.
 - Verificado en vivo: lanza `claude --add-dir <front> --add-dir <back>`.
 
+## 6.c Ejecutar NaN vía OpenCode (2026-06-28)
+
+Flujo elegido para usar los modelos NaN dentro de Orquester: **OpenCode** (mejor
+soporte de proveedores custom OpenAI-compatibles).
+
+- **NaN** = endpoint OpenAI-compatible `https://api.nan.builders/v1` (chat_completions).
+  Clave en `~/.hermes/.env` como `NAN_API_KEY`. Modelos: `qwen3.6` (default, visión+tools),
+  `deepseek-v4-flash`, `mimo-v2.5`, `gemma4` (+ whisper/kokoro/flux para audio/imagen).
+- **Config OpenCode**: `~/.config/opencode/opencode.json` (chmod 600) con `provider.nan`
+  usando `@ai-sdk/openai-compatible` (`options.baseURL` + `options.apiKey`) y
+  `"model": "nan/qwen3.6"` por defecto. La key va en el fichero (600), no en el repo.
+- **Uso**: en la UI, "+" → Agents → **OpenCode** arranca el TUI usando NaN/qwen3.6.
+- **Nota agentes**: los "agents" del registry son binarios del host que el daemon lanza
+  como PTY; deben estar instalados (claude/kimi nativos; codex/opencode/pi vía npm en
+  `~/.local`). Pi usa proveedores conocidos (default google), sin base-url custom → para
+  NaN se usa OpenCode, no Pi.
+- **Gotcha npm**: instalar agentes requería prefijo npm escribible. `npm config set prefix
+  ~/.local` (en `~/.npmrc`) + reiniciar el daemon para que herede el prefijo (las env
+  `npm_config_*` ganan al `.npmrc`).
+
 ## 7. Próximos pasos sugeridos
 
 1. **UI de target genérico** (SPEC-loop-targets fases 5-6): selector repo/directorio
