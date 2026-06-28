@@ -122,13 +122,21 @@ export const TerminalView: React.FC<{ session: SessionSummary }> = ({ session })
     let stream = openStream();
 
     function openStream() {
-      return api.openSessionOutput(session.id, {
+      // Per-stream guard: once this stream is closed (cleanup, reconnect, or a
+      // StrictMode remount) its callbacks must NOT write to termRef anymore.
+      // termRef is shared across stream instances, so a lingering old stream
+      // would otherwise double every byte written to the current terminal.
+      let active = true;
+      const handle = api.openSessionOutput(session.id, {
         onData: (chunk) => {
-          if (termRef.current) {
+          if (active && termRef.current) {
             termRef.current.write(chunk);
           }
         },
         onEnd: () => {
+          if (!active) {
+            return;
+          }
           if (termRef.current) {
             termRef.current.write("\r\n\x1b[2m[session ended]\x1b[0m\r\n");
           }
@@ -143,6 +151,12 @@ export const TerminalView: React.FC<{ session: SessionSummary }> = ({ session })
           }
         }
       });
+      return {
+        close: () => {
+          active = false;
+          handle.close();
+        }
+      };
     }
 
     const handleVisibility = () => {
