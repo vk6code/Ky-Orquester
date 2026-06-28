@@ -4,6 +4,7 @@ import { ApiClient, ApiError } from "../lib/api-client";
 import { createTransporter } from "../lib/transporters";
 import { toRemoteConfig, toUiConnection } from "../lib/connections";
 import { clearStoredHash, deriveAuthHash, loadStoredHash, storeHash } from "../lib/auth";
+import { genId } from "../lib/id";
 import type { AppConfigAdapter } from "../lib/app-config";
 import type { HttpClient } from "../lib/http-client";
 import type { Transporter } from "../lib/transporter";
@@ -556,7 +557,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addRemote: async (input) => {
     const connection: UiConnection = {
-      id: crypto.randomUUID(),
+      id: genId(),
       name: input.name.trim() || input.baseUrl,
       kind: "remote",
       endpoint: input.baseUrl.trim().replace(/\/$/, ""),
@@ -732,7 +733,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!project) {
         return state;
       }
-      const tab: FileTab = { id: crypto.randomUUID(), projectPath: project.path, title: "Files" };
+      const tab: FileTab = { id: genId(), projectPath: project.path, title: "Files" };
       return {
         fileTabsByProject: {
           ...state.fileTabsByProject,
@@ -752,7 +753,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (existing) {
         return { activeTabByProject: { ...state.activeTabByProject, [project.path]: existing.id } };
       }
-      const tab: PlansTab = { id: crypto.randomUUID(), projectPath: project.path, title: "Gorila360" };
+      const tab: PlansTab = { id: genId(), projectPath: project.path, title: "Gorila360" };
       return {
         plansTabsByProject: {
           ...state.plansTabsByProject,
@@ -772,7 +773,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (existing) {
         return { activeTabByProject: { ...state.activeTabByProject, [project.path]: existing.id } };
       }
-      const tab: LoopTab = { id: crypto.randomUUID(), projectPath: project.path, title: "Loop Runner" };
+      const tab: LoopTab = { id: genId(), projectPath: project.path, title: "Loop Runner" };
       return {
         loopTabsByProject: {
           ...state.loopTabsByProject,
@@ -792,7 +793,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (existing) {
         return { activeTabByProject: { ...state.activeTabByProject, [project.path]: existing.id } };
       }
-      const tab: AgentLauncherTab = { id: crypto.randomUUID(), projectPath: project.path, title: "Agent workspace" };
+      const tab: AgentLauncherTab = { id: genId(), projectPath: project.path, title: "Agent workspace" };
       return {
         agentTabsByProject: {
           ...state.agentTabsByProject,
