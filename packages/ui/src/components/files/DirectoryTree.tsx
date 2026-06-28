@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Folder, FolderOpen, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, File, Folder, FolderOpen, Loader2 } from "lucide-react";
 import type { FsEntry } from "@orquester/api";
 import { cn } from "../../lib/cn";
 import { useApi } from "../../context/orquester-context";
@@ -7,15 +7,18 @@ import { useApi } from "../../context/orquester-context";
 const baseName = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
 
 /**
- * Expandable, directory-only tree with single selection. Lazily loads children
+ * Expandable filesystem tree with single folder selection. Lazily loads children
  * from /api/fs as folders are expanded. Clicking a folder name selects it;
- * clicking the chevron expands/collapses. Re-roots when `rootPath` changes.
+ * clicking the chevron expands/collapses. With `showFiles`, files are listed too
+ * (muted, non-selectable) so it reads like a real explorer. Re-roots on `rootPath`.
  */
 export const DirectoryTree: React.FC<{
   rootPath: string;
   selectedPath: string | null;
   onSelect: (path: string) => void;
-}> = ({ rootPath, selectedPath, onSelect }) => {
+  /** Also show files (as muted, non-selectable leaves) for context. */
+  showFiles?: boolean;
+}> = ({ rootPath, selectedPath, onSelect, showFiles = false }) => {
   const api = useApi();
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FsEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -26,7 +29,7 @@ export const DirectoryTree: React.FC<{
       setLoading((s) => new Set(s).add(dir));
       try {
         const res = await api.listFiles(dir);
-        setChildrenByPath((prev) => ({ ...prev, [dir]: res.entries.filter((e) => e.kind === "dir") }));
+        setChildrenByPath((prev) => ({ ...prev, [dir]: res.entries }));
       } catch {
         setChildrenByPath((prev) => ({ ...prev, [dir]: [] }));
       } finally {
@@ -109,6 +112,17 @@ export const DirectoryTree: React.FC<{
     );
   };
 
+  const FileRow: React.FC<{ name: string; depth: number }> = ({ name, depth }) => (
+    <div
+      className="flex items-center gap-1.5 py-0.5 text-sm text-neutral-500"
+      style={{ paddingLeft: 4 + depth * 14 + 20 }}
+      title={name}
+    >
+      <File size={13} className="shrink-0 text-neutral-600" />
+      <span className="truncate">{name}</span>
+    </div>
+  );
+
   const renderChildren = (dir: string, depth: number): React.ReactNode => {
     if (!expanded.has(dir)) {
       return null;
@@ -117,19 +131,28 @@ export const DirectoryTree: React.FC<{
     if (!kids) {
       return null; // loading shown on the parent row's spinner
     }
-    if (kids.length === 0) {
+    const dirs = kids.filter((e) => e.kind === "dir");
+    const files = showFiles ? kids.filter((e) => e.kind === "file") : [];
+    if (dirs.length === 0 && files.length === 0) {
       return (
         <p className="py-0.5 text-xs text-neutral-600" style={{ paddingLeft: 4 + (depth + 1) * 14 + 20 }}>
           (empty)
         </p>
       );
     }
-    return kids.map((entry) => (
-      <React.Fragment key={entry.path}>
-        <Row path={entry.path} label={entry.name} depth={depth} />
-        {renderChildren(entry.path, depth + 1)}
-      </React.Fragment>
-    ));
+    return (
+      <>
+        {dirs.map((entry) => (
+          <React.Fragment key={entry.path}>
+            <Row path={entry.path} label={entry.name} depth={depth} />
+            {renderChildren(entry.path, depth + 1)}
+          </React.Fragment>
+        ))}
+        {files.map((entry) => (
+          <FileRow key={entry.path} name={entry.name} depth={depth} />
+        ))}
+      </>
+    );
   };
 
   return (

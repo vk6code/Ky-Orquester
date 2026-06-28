@@ -76,12 +76,12 @@ export const FolderPickerModal: React.FC<{
         </div>
 
         <div className="max-h-[55vh] min-h-[14rem] flex-1 overflow-auto p-2">
-          <DirectoryTree rootPath={root} selectedPath={selected} onSelect={setSelected} />
+          <DirectoryTree rootPath={root} selectedPath={selected} onSelect={setSelected} showFiles />
         </div>
 
         <div className="flex items-center gap-2 border-t border-neutral-800 px-3 py-2.5">
           <span className="flex-1 truncate text-xs text-neutral-500" title={selected}>
-            {selected}
+            <span className="text-neutral-600">Selected:</span> {selected}
           </span>
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
