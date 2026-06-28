@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowUp, Bot, Folder, FolderOpen, Loader2, Play, Plus, X } from "lucide-react";
-import type { FsEntry } from "@orquester/api";
-import { cn } from "../../lib/cn";
-import { useApi } from "../../context/orquester-context";
+import { ArrowUp, Bot, Folder, FolderOpen, HardDrive, Loader2, Play, Plus, X } from "lucide-react";
 import { useRegistry } from "../../hooks";
 import { useAppStore } from "../../store/app";
 import { getRegistryIcon } from "../../icons";
+import { DirectoryTree } from "../files";
 import { Button, Input, Modal, ModalCloseButton } from "../ui";
+
+const parentOf = (p: string) => {
+  const t = p.replace(/\/+$/, "");
+  const i = t.lastIndexOf("/");
+  return i <= 0 ? "/" : t.slice(0, i);
+};
 
 const baseName = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
 
@@ -220,99 +224,79 @@ export const AgentWorkspace: React.FC = () => {
   );
 };
 
-/** Modal directory browser: navigate folders and select one. */
+/** Modal directory picker: an expandable folder tree you can re-root anywhere. */
 const DirPickerModal: React.FC<{
   open: boolean;
   startDir: string;
   onPick: (dir: string) => void;
   onClose: () => void;
 }> = ({ open, startDir, onPick, onClose }) => {
-  const api = useApi();
-  const [dir, setDir] = useState(startDir);
-  const [parent, setParent] = useState<string | null>(null);
-  const [entries, setEntries] = useState<FsEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [root, setRoot] = useState(startDir || "/");
+  const [pathInput, setPathInput] = useState(startDir || "/");
+  const [selected, setSelected] = useState(startDir || "/");
 
   useEffect(() => {
     if (open) {
-      setDir(startDir || "/");
+      const s = startDir || "/";
+      setRoot(s);
+      setPathInput(s);
+      setSelected(s);
     }
   }, [open, startDir]);
 
-  useEffect(() => {
-    if (!open || !dir) {
-      return;
-    }
-    let active = true;
-    setLoading(true);
-    setError(null);
-    api
-      .listFiles(dir)
-      .then((res) => {
-        if (!active) return;
-        setParent(res.parent);
-        setEntries(res.entries.filter((e) => e.kind === "dir"));
-      })
-      .catch(() => active && setError("Cannot read this directory."))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [api, dir, open]);
+  const goTo = (path: string) => {
+    const v = (path.trim() || "/").replace(/(?!^)\/+$/, "");
+    setRoot(v);
+    setPathInput(v);
+    setSelected(v);
+  };
 
   return (
     <Modal open={open} onClose={onClose} className="max-w-xl">
       <div className="flex w-full flex-col">
         <div className="flex h-11 items-center gap-2 border-b border-neutral-800 px-3">
           <Folder size={15} className="text-cyan-400" />
-          <span className="flex-1 truncate text-sm text-neutral-300" title={dir}>
-            {dir}
-          </span>
+          <span className="flex-1 text-sm text-neutral-300">Select a directory</span>
           <ModalCloseButton onClose={onClose} />
         </div>
 
         <div className="flex items-center gap-2 border-b border-neutral-800 px-3 py-2">
+          <Button variant="outline" size="sm" onClick={() => goTo("/")} title="Filesystem root">
+            <HardDrive size={14} />/
+          </Button>
           <Button
             variant="outline"
             size="sm"
-            disabled={!parent || parent === dir}
-            onClick={() => parent && setDir(parent)}
+            disabled={root === "/"}
+            onClick={() => goTo(parentOf(root))}
+            title="Up one level"
           >
             <ArrowUp size={14} />
-            Up
           </Button>
-          <Input value={dir} onChange={(event) => setDir(event.target.value)} placeholder="/absolute/path" />
+          <Input
+            value={pathInput}
+            onChange={(event) => setPathInput(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && goTo(pathInput)}
+            placeholder="/home/srv"
+          />
+          <Button variant="outline" size="sm" onClick={() => goTo(pathInput)}>
+            Go
+          </Button>
         </div>
 
-        <div className="max-h-[50vh] min-h-[12rem] flex-1 overflow-auto py-1">
-          {loading && <p className="px-3 py-2 text-xs text-neutral-600">Loading…</p>}
-          {error && <p className="px-3 py-2 text-xs text-red-400">{error}</p>}
-          {!loading && !error && entries.length === 0 && (
-            <p className="px-3 py-2 text-xs text-neutral-600">No sub-directories.</p>
-          )}
-          {entries.map((entry) => (
-            <button
-              key={entry.path}
-              type="button"
-              onClick={() => setDir(entry.path)}
-              className={cn(
-                "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-neutral-300",
-                "hover:bg-neutral-800/70"
-              )}
-            >
-              <Folder size={14} className="shrink-0 text-neutral-500" />
-              <span className="flex-1 truncate">{entry.name}</span>
-            </button>
-          ))}
+        <div className="max-h-[55vh] min-h-[14rem] flex-1 overflow-auto p-2">
+          <DirectoryTree rootPath={root} selectedPath={selected} onSelect={setSelected} />
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-neutral-800 px-3 py-2.5">
+        <div className="flex items-center gap-2 border-t border-neutral-800 px-3 py-2.5">
+          <span className="flex-1 truncate text-xs text-neutral-500" title={selected}>
+            {selected}
+          </span>
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" onClick={() => onPick(dir)} disabled={!dir.trim()}>
-            Select this directory
+          <Button size="sm" onClick={() => onPick(selected)} disabled={!selected.trim()}>
+            Select
           </Button>
         </div>
       </div>
