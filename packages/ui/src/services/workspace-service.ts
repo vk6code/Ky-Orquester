@@ -19,7 +19,12 @@ export const workspaceService = {
     return api.listProjects(workspace, signal);
   },
 
-  createProject(api: ApiClient, workspace: string, name: string): Promise<ProjectSummary> {
-    return api.createProject(workspace, { name });
+  createProject(
+    api: ApiClient,
+    workspace: string,
+    name: string,
+    linkPath?: string
+  ): Promise<ProjectSummary> {
+    return api.createProject(workspace, linkPath ? { name, linkPath } : { name });
   }
 };

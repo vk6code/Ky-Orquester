@@ -3,13 +3,19 @@ import { Input } from "../ui";
 
 export interface NewItemInputProps {
   placeholder: string;
+  defaultValue?: string;
   onSubmit: (name: string) => void;
   onCancel: () => void;
 }
 
 /** Inline row for naming a new workspace/project; Enter submits, Escape cancels. */
-export const NewItemInput: React.FC<NewItemInputProps> = ({ placeholder, onSubmit, onCancel }) => {
-  const [value, setValue] = useState("");
+export const NewItemInput: React.FC<NewItemInputProps> = ({
+  placeholder,
+  defaultValue = "",
+  onSubmit,
+  onCancel
+}) => {
+  const [value, setValue] = useState(defaultValue);
 
   const submit = () => {
     const name = value.trim();

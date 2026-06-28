@@ -48,9 +48,9 @@ import {
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createWriteStream, existsSync, type WriteStream } from "node:fs";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, platform as osPlatform } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { stat } from "node:fs/promises";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -400,12 +400,42 @@ function createServer(
     "/api/workspaces/:workspace/projects",
     async (request, reply): Promise<ProjectSummary | void> => {
       const { workspace } = request.params;
-      const name = (request.body as CreateProjectRequest | undefined)?.name;
+      const body = (request.body ?? {}) as CreateProjectRequest;
+      const name = body.name;
       if (!isValidName(workspace) || !isValidName(name)) {
         return reply.code(400).send({ code: "INVALID_NAME", message: "Invalid name." });
       }
 
       const path = join(resolved.workspacesDir, workspace, name);
+
+      // linkPath: create the project as a symlink to an existing folder anywhere
+      // on the host, so a project can point at e.g. /home/srv/app.
+      if (body.linkPath !== undefined) {
+        if (!isAbsolute(body.linkPath)) {
+          return reply.code(400).send({ code: "INVALID_PATH", message: "linkPath must be absolute." });
+        }
+        try {
+          if (!(await stat(body.linkPath)).isDirectory()) {
+            return reply.code(400).send({ code: "NOT_A_DIR", message: "linkPath is not a directory." });
+          }
+        } catch {
+          return reply.code(400).send({ code: "NO_SUCH_PATH", message: "linkPath does not exist." });
+        }
+        try {
+          await mkdir(join(resolved.workspacesDir, workspace), { recursive: true });
+          await symlink(body.linkPath, path, "dir");
+        } catch (error) {
+          const message =
+            isNodeError(error) && error.code === "EEXIST"
+              ? "A project with that name already exists."
+              : error instanceof Error
+                ? error.message
+                : "Could not link folder.";
+          return reply.code(400).send({ code: "LINK_FAILED", message });
+        }
+        return { name, workspace, path };
+      }
+
       await mkdir(path, { recursive: true });
       return { name, workspace, path };
     }

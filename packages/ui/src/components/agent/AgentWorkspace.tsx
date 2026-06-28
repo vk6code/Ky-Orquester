@@ -1,16 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowUp, Bot, Folder, FolderOpen, HardDrive, Loader2, Play, Plus, X } from "lucide-react";
+import { Bot, Folder, FolderOpen, Loader2, Play, Plus, X } from "lucide-react";
 import { useRegistry } from "../../hooks";
 import { useAppStore } from "../../store/app";
 import { getRegistryIcon } from "../../icons";
-import { DirectoryTree } from "../files";
-import { Button, Input, Modal, ModalCloseButton } from "../ui";
-
-const parentOf = (p: string) => {
-  const t = p.replace(/\/+$/, "");
-  const i = t.lastIndexOf("/");
-  return i <= 0 ? "/" : t.slice(0, i);
-};
+import { FolderPickerModal } from "../files";
+import { Button, Input } from "../ui";
 
 const baseName = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
 
@@ -214,92 +208,13 @@ export const AgentWorkspace: React.FC = () => {
         </div>
       </div>
 
-      <DirPickerModal
+      <FolderPickerModal
         open={picker !== null}
+        title={picker?.mode === "extra" ? "Add a working directory" : "Select the base directory"}
         startDir={picker?.mode === "extra" ? baseDir || currentProject?.path || "/" : baseDir || "/"}
         onPick={onPick}
         onClose={() => setPicker(null)}
       />
     </div>
-  );
-};
-
-/** Modal directory picker: an expandable folder tree you can re-root anywhere. */
-const DirPickerModal: React.FC<{
-  open: boolean;
-  startDir: string;
-  onPick: (dir: string) => void;
-  onClose: () => void;
-}> = ({ open, startDir, onPick, onClose }) => {
-  const [root, setRoot] = useState(startDir || "/");
-  const [pathInput, setPathInput] = useState(startDir || "/");
-  const [selected, setSelected] = useState(startDir || "/");
-
-  useEffect(() => {
-    if (open) {
-      const s = startDir || "/";
-      setRoot(s);
-      setPathInput(s);
-      setSelected(s);
-    }
-  }, [open, startDir]);
-
-  const goTo = (path: string) => {
-    const v = (path.trim() || "/").replace(/(?!^)\/+$/, "");
-    setRoot(v);
-    setPathInput(v);
-    setSelected(v);
-  };
-
-  return (
-    <Modal open={open} onClose={onClose} className="max-w-xl">
-      <div className="flex w-full flex-col">
-        <div className="flex h-11 items-center gap-2 border-b border-neutral-800 px-3">
-          <Folder size={15} className="text-cyan-400" />
-          <span className="flex-1 text-sm text-neutral-300">Select a directory</span>
-          <ModalCloseButton onClose={onClose} />
-        </div>
-
-        <div className="flex items-center gap-2 border-b border-neutral-800 px-3 py-2">
-          <Button variant="outline" size="sm" onClick={() => goTo("/")} title="Filesystem root">
-            <HardDrive size={14} />/
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={root === "/"}
-            onClick={() => goTo(parentOf(root))}
-            title="Up one level"
-          >
-            <ArrowUp size={14} />
-          </Button>
-          <Input
-            value={pathInput}
-            onChange={(event) => setPathInput(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && goTo(pathInput)}
-            placeholder="/home/srv"
-          />
-          <Button variant="outline" size="sm" onClick={() => goTo(pathInput)}>
-            Go
-          </Button>
-        </div>
-
-        <div className="max-h-[55vh] min-h-[14rem] flex-1 overflow-auto p-2">
-          <DirectoryTree rootPath={root} selectedPath={selected} onSelect={setSelected} />
-        </div>
-
-        <div className="flex items-center gap-2 border-t border-neutral-800 px-3 py-2.5">
-          <span className="flex-1 truncate text-xs text-neutral-500" title={selected}>
-            {selected}
-          </span>
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={() => onPick(selected)} disabled={!selected.trim()}>
-            Select
-          </Button>
-        </div>
-      </div>
-    </Modal>
   );
 };

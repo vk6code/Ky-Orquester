@@ -252,7 +252,7 @@ export interface AppState {
   closeWorkspace: () => void;
 
   loadProjects: () => Promise<void>;
-  createProject: (name: string) => Promise<void>;
+  createProject: (name: string, linkPath?: string) => Promise<void>;
   openProject: (project: ProjectSummary) => void;
 
   loadSessions: () => Promise<void>;
@@ -633,13 +633,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  createProject: async (name) => {
+  createProject: async (name, linkPath) => {
     const api = get().api;
     const workspace = get().currentWorkspace;
     if (!api || !workspace) {
       return;
     }
-    await workspaceService.createProject(api, workspace, name);
+    await workspaceService.createProject(api, workspace, name, linkPath);
     await get().loadProjects();
   },
 

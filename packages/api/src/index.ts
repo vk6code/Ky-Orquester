@@ -57,6 +57,12 @@ export interface CreateWorkspaceRequest {
 
 export interface CreateProjectRequest {
   name: string;
+  /**
+   * Absolute path to an existing folder on the server. When set, the project is
+   * created as a symlink to it (instead of a new empty dir), so a project can
+   * point anywhere on the host (e.g. /home/srv/app).
+   */
+  linkPath?: string;
 }
 
 /** A loop target can be a git repo or a plain directory. */

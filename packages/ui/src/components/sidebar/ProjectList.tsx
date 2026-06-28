@@ -1,9 +1,21 @@
 import React, { useState } from "react";
-import { Box, ChevronLeft, FolderPlus, PanelLeftClose, Plus, Banana, Workflow } from "lucide-react";
+import {
+  Box,
+  ChevronLeft,
+  FolderPlus,
+  FolderSymlink,
+  PanelLeftClose,
+  Plus,
+  Banana,
+  Workflow
+} from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Dropdown, DropdownItem, IconButton } from "../ui";
+import { FolderPickerModal } from "../files";
 import { NewItemInput } from "./NewItemInput";
 import { useAppStore } from "../../store/app";
+
+const baseName = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
 
 /** Sidebar view shown after entering a workspace: its projects. */
 export const ProjectList: React.FC = () => {
@@ -18,6 +30,9 @@ export const ProjectList: React.FC = () => {
   const openGorila360Plans = useAppStore((s) => s.openGorila360Plans);
   const openLoopRunner = useAppStore((s) => s.openLoopRunner);
   const [creating, setCreating] = useState<null | "project" | "folder">(null);
+  // Linking an external server folder as a project (symlink under the workspace).
+  const [linkPicking, setLinkPicking] = useState(false);
+  const [linkPath, setLinkPath] = useState<string | null>(null);
 
   return (
     <>
@@ -46,6 +61,9 @@ export const ProjectList: React.FC = () => {
           <DropdownItem icon={<FolderPlus size={14} />} onClick={() => setCreating("folder")}>
             New Folder
           </DropdownItem>
+          <DropdownItem icon={<FolderSymlink size={14} />} onClick={() => setLinkPicking(true)}>
+            Link folder…
+          </DropdownItem>
         </Dropdown>
       </div>
 
@@ -57,6 +75,19 @@ export const ProjectList: React.FC = () => {
             onSubmit={(name) => {
               setCreating(null);
               void createProject(name);
+            }}
+          />
+        )}
+
+        {linkPath !== null && (
+          <NewItemInput
+            placeholder="project-name"
+            defaultValue={baseName(linkPath)}
+            onCancel={() => setLinkPath(null)}
+            onSubmit={(name) => {
+              const target = linkPath;
+              setLinkPath(null);
+              void createProject(name, target ?? undefined);
             }}
           />
         )}
@@ -105,6 +136,18 @@ export const ProjectList: React.FC = () => {
           </button>
         </div>
       )}
+
+      <FolderPickerModal
+        open={linkPicking}
+        title="Link a server folder as a project"
+        confirmLabel="Use this folder"
+        startDir="/"
+        onPick={(dir) => {
+          setLinkPicking(false);
+          setLinkPath(dir);
+        }}
+        onClose={() => setLinkPicking(false)}
+      />
     </>
   );
 };
