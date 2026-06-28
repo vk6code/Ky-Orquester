@@ -10,6 +10,9 @@ import type { HttpClient } from "../lib/http-client";
 import type { Transporter } from "../lib/transporter";
 import { workspaceService } from "../services";
 import type {
+  AgentLoopRequest,
+  AgentLoopResponse,
+  AgentLoopStatus,
   ConnectionStatus,
   EventMessage,
   ProjectSummary,
@@ -211,6 +214,8 @@ export interface AppState {
   labels: Record<string, string>;
   /** Workspace/project paths hidden from the sidebar (disk untouched). */
   hidden: string[];
+  /** Live status of the current/last multi-agent relay loop (null if none). */
+  agentLoop: AgentLoopStatus | null;
 
   /** All daemon sessions; a project's sessions are its tabs. */
   sessions: SessionSummary[];
@@ -270,6 +275,11 @@ export interface AppState {
   /** Hide or restore a workspace/project in the sidebar (disk untouched). */
   setHidden: (path: string, hidden: boolean) => Promise<void>;
 
+  /** Start a multi-agent relay loop; returns the launch response. */
+  startAgentLoop: (req: AgentLoopRequest) => Promise<AgentLoopResponse>;
+  /** Ask the active relay loop to stop after the current turn. */
+  stopAgentLoop: () => Promise<void>;
+
   loadSessions: () => Promise<void>;
   loadRegistry: () => Promise<void>;
   installAgent: (id: string) => Promise<void>;
@@ -313,6 +323,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   projectsLoading: false,
   labels: {},
   hidden: [],
+  agentLoop: null,
   sessions: [],
   fileTabsByProject: {},
   plansTabsByProject: {},
@@ -754,6 +765,33 @@ export const useAppStore = create<AppState>((set, get) => ({
     await api.saveHidden(next).catch(() => undefined);
   },
 
+  startAgentLoop: async (req) => {
+    const api = get().api;
+    if (!api) {
+      throw new Error("Not connected.");
+    }
+    const res = await api.startAgentLoop(req);
+    set({
+      agentLoop: {
+        loopId: res.loopId,
+        sessionId: res.sessionId,
+        round: 0,
+        agent: res.agents[0] ?? "",
+        state: "running"
+      }
+    });
+    return res;
+  },
+
+  stopAgentLoop: async () => {
+    const api = get().api;
+    const loop = get().agentLoop;
+    if (!api || !loop) {
+      return;
+    }
+    await api.stopAgentLoop(loop.loopId).catch(() => undefined);
+  },
+
   loadSessions: async () => {
     const api = get().api;
     if (!api) {
@@ -945,6 +983,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (event.channel === "registry" && event.type === "registry.changed") {
       const entry = event.payload as RegistryEntry;
       set((state) => ({ registry: applyRegistryEntry(state.registry, entry) }));
+      return;
+    }
+    if (event.channel === "agent-loops") {
+      if (event.type === "agent-loop.turn" || event.type === "agent-loop.done") {
+        const status = event.payload as AgentLoopStatus;
+        // Ignore stale events from a previous loop the user has since replaced.
+        if (get().agentLoop?.loopId === status.loopId) {
+          set({ agentLoop: status });
+        }
+      }
       return;
     }
     if (event.channel !== "sessions") {

@@ -98,6 +98,53 @@ export interface LoopRunResponse {
   outputUrl: string;
 }
 
+/**
+ * Multi-agent relay loop: a task is handed off between agents in turn. Each
+ * agent runs one-shot in the workspace, reads a shared "baton" file (task +
+ * prior turns), does the next step, and its output is appended back to the
+ * baton for the next agent. The relay stops when an agent emits the
+ * `<<LOOP_DONE>>` token or after `maxRounds` full cycles through `agents`.
+ */
+export interface AgentLoopRequest {
+  /** Absolute path the agents run in (repo or directory). */
+  path: string;
+  /** The task to accomplish, handed between agents. */
+  task: string;
+  /** Ordered agent refIds to rotate through, e.g. ["claude","codex"]. */
+  agents: string[];
+  /** Max full cycles through `agents` before stopping (safety cap). */
+  maxRounds: number;
+  /** Project the loop's session belongs to (for tab grouping). */
+  projectPath?: string;
+}
+
+/** Result returned when an agent relay loop is launched. */
+export interface AgentLoopResponse {
+  ok: true;
+  loopId: string;
+  /** Shell session that streams the whole relay (one tab). */
+  sessionId: string;
+  path: string;
+  agents: string[];
+  maxRounds: number;
+  /** The shared baton file path. */
+  batonPath: string;
+}
+
+/** Live status of an agent relay loop, broadcast on the "agent-loops" channel. */
+export interface AgentLoopStatus {
+  loopId: string;
+  sessionId: string;
+  /** 0-based turn index across the whole relay. */
+  round: number;
+  /** Agent acting on the current/last turn. */
+  agent: string;
+  state: "running" | "done";
+  /** Why the loop ended (only when state === "done"). */
+  reason?: "completed" | "maxRounds" | "stopped" | "error";
+  message?: string;
+}
+
 /** A filesystem entry returned by the file browser. */
 export interface FsEntry {
   name: string;

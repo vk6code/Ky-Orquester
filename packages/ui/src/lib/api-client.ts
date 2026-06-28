@@ -1,4 +1,6 @@
 import type {
+  AgentLoopRequest,
+  AgentLoopResponse,
   AgentSummary,
   AuthInfoResponse,
   CreateProjectRequest,
@@ -278,6 +280,15 @@ export class ApiClient {
 
   runGorila360Loop(req: Gorila360LoopRunRequest): Promise<Gorila360LoopRunResponse> {
     return this.send("POST", "/api/gorila360/loops", { body: req });
+  }
+
+  // Multi-agent relay loop: hand a task between agents in turn.
+  startAgentLoop(req: AgentLoopRequest): Promise<AgentLoopResponse> {
+    return this.send("POST", "/api/agent-loops", { body: req });
+  }
+
+  stopAgentLoop(loopId: string): Promise<{ ok: true }> {
+    return this.send("POST", `/api/agent-loops/${encodeURIComponent(loopId)}/stop`, {});
   }
 }
 
