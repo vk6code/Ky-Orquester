@@ -1,8 +1,14 @@
 import type { FastifyInstance } from "fastify";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 
-const PLANS_DIR = "/Users/victor/Documents/gorila360/frontend/docs/superpowers/plans";
+// Gorila360 plans are an optional preset. Configure with ORQUESTER_GORILA360_PLANS_DIR,
+// or it derives from ORQUESTER_GORILA360_ROOT. Unset => the endpoint returns [].
+const PLANS_DIR =
+  process.env.ORQUESTER_GORILA360_PLANS_DIR ??
+  (process.env.ORQUESTER_GORILA360_ROOT
+    ? join(process.env.ORQUESTER_GORILA360_ROOT, "frontend/docs/superpowers/plans")
+    : "");
 
 export interface Gorila360PlanSummary {
   id: string;
@@ -18,6 +24,10 @@ function parseTitle(content: string, filename: string): string {
 }
 
 export async function listGorila360Plans(): Promise<Gorila360PlanSummary[]> {
+  if (!PLANS_DIR) {
+    return [];
+  }
+
   const entries = await readdir(PLANS_DIR, { withFileTypes: true });
   const files = entries.filter((e) => e.isFile() && extname(e.name) === ".md");
 
@@ -25,9 +35,6 @@ export async function listGorila360Plans(): Promise<Gorila360PlanSummary[]> {
     files.map(async (file) => {
       const path = join(PLANS_DIR, file.name);
       const content = await readFile(path, "utf8").catch(() => "");
-      const stats = await readFile(path).catch(() => Buffer.alloc(0));
-      // We don't have mtime from readFile; use a lightweight stat alternative.
-      const { stat } = await import("node:fs/promises");
       const mtime = (await stat(path).catch(() => ({ mtime: new Date(0) }))).mtime;
 
       return {

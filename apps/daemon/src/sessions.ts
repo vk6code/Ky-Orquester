@@ -41,7 +41,17 @@ export class SessionManager {
     const cwd = req.cwd || req.projectPath || homedir();
     const id = randomUUID();
 
-    const pty = spawn(entry.resolvedBin, [], {
+    // Extra working directories (e.g. frontend + backend). Attached only when the
+    // agent declares an addDirFlag (Claude Code: "--add-dir"); otherwise ignored.
+    const extraDirs = (req.extraDirs ?? [])
+      .filter((dir): dir is string => typeof dir === "string" && dir.trim().length > 0)
+      .map((dir) => dir.trim());
+    const args =
+      entry.addDirFlag && extraDirs.length > 0
+        ? extraDirs.flatMap((dir) => [entry.addDirFlag as string, dir])
+        : [];
+
+    const pty = spawn(entry.resolvedBin, args, {
       name: "xterm-256color",
       cwd,
       cols,
@@ -59,7 +69,8 @@ export class SessionManager {
       cols,
       rows,
       status: "running",
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      ...(extraDirs.length > 0 ? { extraDirs } : {})
     };
 
     const session: Session = { summary, pty, buffer: "", emitter: new EventEmitter() };

@@ -179,6 +179,8 @@ export interface RegistryEntry {
   installCmd?: string;
   /** Shell command to update the bin (agents only). */
   updateCmd?: string;
+  /** Launch flag to attach an extra working directory (e.g. "--add-dir" for Claude Code). */
+  addDirFlag?: string;
   /** Live install/update status (daemon-managed, streamed over events). */
   installState: RegistryInstallState;
   /** Captured output when `installState === "error"`. */
@@ -230,6 +232,8 @@ export interface SessionSummary {
   status: SessionStatus;
   exitCode?: number;
   createdAt: string;
+  /** Extra working directories attached to an agent session (e.g. frontend + backend). */
+  extraDirs?: string[];
 }
 
 export interface CreateSessionRequest {
@@ -240,6 +244,13 @@ export interface CreateSessionRequest {
   cols?: number;
   rows?: number;
   title?: string;
+  /**
+   * Additional working directories to attach to the session. For agents that
+   * declare an `addDirFlag` (e.g. Claude Code's `--add-dir`), each dir is passed
+   * as a launch argument so one agent can span several roots (frontend+backend).
+   * Ignored for agents/shells without multi-root support.
+   */
+  extraDirs?: string[];
 }
 
 export interface SessionInputRequest {

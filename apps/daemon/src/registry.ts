@@ -23,6 +23,7 @@ interface RegistryDef {
   versionFlag?: string;
   installCmd?: string;
   updateCmd?: string;
+  addDirFlag?: string;
 }
 
 function expand(tokens: readonly string[]): string[] {
@@ -79,6 +80,7 @@ function materialize(list: readonly RegistryEntryDef[]): RegistryDef[] {
     if (s.versionFlag) d.versionFlag = s.versionFlag;
     if (s.installCmd) d.installCmd = s.installCmd;
     if (s.updateCmd) d.updateCmd = s.updateCmd;
+    if (s.addDirFlag) d.addDirFlag = s.addDirFlag;
     return d;
   });
 }
@@ -255,6 +257,7 @@ export class RegistryService {
       versionFlag: def.versionFlag,
       installCmd: def.installCmd,
       updateCmd: def.updateCmd,
+      addDirFlag: def.addDirFlag,
       installState: "idle"
     };
   }
@@ -304,7 +307,8 @@ function normalizeDef(item: unknown, defaultKind: RegistryKind): RegistryDef | n
     enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
     versionFlag: typeof obj.versionFlag === "string" ? obj.versionFlag : undefined,
     installCmd: typeof obj.installCmd === "string" ? obj.installCmd : undefined,
-    updateCmd: typeof obj.updateCmd === "string" ? obj.updateCmd : undefined
+    updateCmd: typeof obj.updateCmd === "string" ? obj.updateCmd : undefined,
+    addDirFlag: typeof obj.addDirFlag === "string" ? obj.addDirFlag : undefined
   };
 }
 

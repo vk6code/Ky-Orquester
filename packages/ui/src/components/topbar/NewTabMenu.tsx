@@ -1,5 +1,5 @@
 import React from "react";
-import { FolderTree, Plus } from "lucide-react";
+import { Bot, FolderTree, Plus } from "lucide-react";
 import {
   AdaptiveMenu,
   DropdownEmpty,
@@ -20,6 +20,7 @@ import { useAppStore } from "../../store/app";
 export const NewTabMenu: React.FC = () => {
   const openTab = useAppStore((s) => s.openTab);
   const openFileBrowser = useAppStore((s) => s.openFileBrowser);
+  const openAgentLauncher = useAppStore((s) => s.openAgentLauncher);
   const registry = useRegistry();
 
   const shells = registry.shells.filter((s) => s.enabled);
@@ -50,6 +51,9 @@ export const NewTabMenu: React.FC = () => {
       <DropdownSeparator />
 
       <DropdownLabel>Tools</DropdownLabel>
+      <DropdownItem icon={<Bot size={14} />} onClick={() => openAgentLauncher()}>
+        Agent workspace
+      </DropdownItem>
       <DropdownItem icon={<FolderTree size={14} />} onClick={() => openFileBrowser()}>
         File Browser
       </DropdownItem>

@@ -150,12 +150,20 @@ export interface LoopTab {
   title: string;
 }
 
+/** A client-local multi-directory agent launcher tab. */
+export interface AgentLauncherTab {
+  id: string;
+  projectPath: string;
+  title: string;
+}
+
 /** A tab in the current project: a daemon session or a local tool tab. */
 export type ProjectTab =
   | { id: string; type: "session"; session: SessionSummary }
   | { id: string; type: "files"; title: string }
   | { id: string; type: "plans"; title: string }
-  | { id: string; type: "loops"; title: string };
+  | { id: string; type: "loops"; title: string }
+  | { id: string; type: "agent-launcher"; title: string };
 
 function upsertSession(sessions: SessionSummary[], next: SessionSummary): SessionSummary[] {
   const index = sessions.findIndex((s) => s.id === next.id);
@@ -207,6 +215,8 @@ export interface AppState {
   plansTabsByProject: Record<string, PlansTab[]>;
   /** Client-local generic loop runner tabs per project path. */
   loopTabsByProject: Record<string, LoopTab[]>;
+  /** Client-local multi-directory agent launcher tabs per project path. */
+  agentTabsByProject: Record<string, AgentLauncherTab[]>;
   /** Client-local active tab id per project path (session or file tab). */
   activeTabByProject: Record<string, string | null>;
 
@@ -252,6 +262,14 @@ export interface AppState {
   openFileBrowser: () => void;
   openGorila360Plans: () => void;
   openLoopRunner: () => void;
+  openAgentLauncher: () => void;
+  /** Launch an agent session with a base cwd + extra working dirs (multi-root). */
+  launchAgentWorkspace: (input: {
+    refId: string;
+    title?: string;
+    cwd: string;
+    extraDirs: string[];
+  }) => Promise<void>;
   closeTab: (id: string) => Promise<void>;
   activateTab: (id: string) => void;
 
@@ -281,6 +299,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fileTabsByProject: {},
   plansTabsByProject: {},
   loopTabsByProject: {},
+  agentTabsByProject: {},
   activeTabByProject: {},
 
   setApi: (api) => set({ api }),
@@ -529,6 +548,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       fileTabsByProject: {},
       plansTabsByProject: {},
       loopTabsByProject: {},
+      agentTabsByProject: {},
       activeTabByProject: {}
     });
     await get().connect();
@@ -629,6 +649,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         state.sessions,
         state.plansTabsByProject,
         state.loopTabsByProject,
+        state.agentTabsByProject,
         state.fileTabsByProject,
         project.path
       );
@@ -761,15 +782,59 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }),
 
+  openAgentLauncher: () =>
+    set((state) => {
+      const project = state.currentProject;
+      if (!project) {
+        return state;
+      }
+      const existing = state.agentTabsByProject[project.path]?.[0];
+      if (existing) {
+        return { activeTabByProject: { ...state.activeTabByProject, [project.path]: existing.id } };
+      }
+      const tab: AgentLauncherTab = { id: crypto.randomUUID(), projectPath: project.path, title: "Agent workspace" };
+      return {
+        agentTabsByProject: {
+          ...state.agentTabsByProject,
+          [project.path]: [tab]
+        },
+        activeTabByProject: { ...state.activeTabByProject, [project.path]: tab.id }
+      };
+    }),
+
+  launchAgentWorkspace: async ({ refId, title, cwd, extraDirs }) => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    const project = get().currentProject;
+    const session = await api.createSession({
+      kind: "agent",
+      refId,
+      title,
+      projectPath: project?.path ?? cwd,
+      cwd,
+      extraDirs
+    });
+    set((state) => ({
+      sessions: upsertSession(state.sessions, session),
+      activeTabByProject: project
+        ? { ...state.activeTabByProject, [project.path]: session.id }
+        : state.activeTabByProject
+    }));
+  },
+
   closeTab: async (id) => {
     const api = get().api;
     const isSession = get().sessions.some((s) => s.id === id);
     const isPlans = Object.values(get().plansTabsByProject).some((tabs) => tabs.some((t) => t.id === id));
     const isLoops = Object.values(get().loopTabsByProject).some((tabs) => tabs.some((t) => t.id === id));
+    const isAgent = Object.values(get().agentTabsByProject).some((tabs) => tabs.some((t) => t.id === id));
     set((state) => {
       if (isSession) return removeSession(state, id);
       if (isPlans) return removePlansTab(state, id);
       if (isLoops) return removeLoopTab(state, id);
+      if (isAgent) return removeAgentTab(state, id);
       return removeFileTab(state, id);
     });
     if (isSession) {
@@ -805,11 +870,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }));
 
-/** First remaining tab id for a project (session preferred, then loop/plans/files). */
+/** First remaining tab id for a project (session preferred, then loop/plans/agent/files). */
 function firstTabId(
   sessions: SessionSummary[],
   plansTabs: Record<string, PlansTab[]>,
   loopTabs: Record<string, LoopTab[]>,
+  agentTabs: Record<string, AgentLauncherTab[]>,
   fileTabs: Record<string, FileTab[]>,
   path: string
 ): string | null {
@@ -817,6 +883,7 @@ function firstTabId(
     sessions.find((s) => s.projectPath === path)?.id ??
     plansTabs[path]?.[0]?.id ??
     loopTabs[path]?.[0]?.id ??
+    agentTabs[path]?.[0]?.id ??
     fileTabs[path]?.[0]?.id ??
     null
   );
@@ -828,12 +895,13 @@ function reassignActive(
   sessions: SessionSummary[],
   plansTabs: Record<string, PlansTab[]>,
   loopTabs: Record<string, LoopTab[]>,
+  agentTabs: Record<string, AgentLauncherTab[]>,
   fileTabs: Record<string, FileTab[]>
 ): Record<string, string | null> {
   const next = { ...activeTabByProject };
   for (const [path, activeId] of Object.entries(next)) {
     if (activeId === removedId) {
-      next[path] = firstTabId(sessions, plansTabs, loopTabs, fileTabs, path);
+      next[path] = firstTabId(sessions, plansTabs, loopTabs, agentTabs, fileTabs, path);
     }
   }
   return next;
@@ -849,6 +917,7 @@ function removeSession(state: AppState, id: string): Partial<AppState> {
       sessions,
       state.plansTabsByProject,
       state.loopTabsByProject,
+      state.agentTabsByProject,
       state.fileTabsByProject
     )
   };
@@ -867,6 +936,7 @@ function removeFileTab(state: AppState, id: string): Partial<AppState> {
       state.sessions,
       state.plansTabsByProject,
       state.loopTabsByProject,
+      state.agentTabsByProject,
       fileTabsByProject
     )
   };
@@ -885,6 +955,7 @@ function removePlansTab(state: AppState, id: string): Partial<AppState> {
       state.sessions,
       plansTabsByProject,
       state.loopTabsByProject,
+      state.agentTabsByProject,
       state.fileTabsByProject
     )
   };
@@ -903,6 +974,26 @@ function removeLoopTab(state: AppState, id: string): Partial<AppState> {
       state.sessions,
       state.plansTabsByProject,
       loopTabsByProject,
+      state.agentTabsByProject,
+      state.fileTabsByProject
+    )
+  };
+}
+
+function removeAgentTab(state: AppState, id: string): Partial<AppState> {
+  const agentTabsByProject: Record<string, AgentLauncherTab[]> = {};
+  for (const [path, tabs] of Object.entries(state.agentTabsByProject)) {
+    agentTabsByProject[path] = tabs.filter((t) => t.id !== id);
+  }
+  return {
+    agentTabsByProject,
+    activeTabByProject: reassignActive(
+      state.activeTabByProject,
+      id,
+      state.sessions,
+      state.plansTabsByProject,
+      state.loopTabsByProject,
+      agentTabsByProject,
       state.fileTabsByProject
     )
   };
@@ -914,6 +1005,7 @@ export function useProjectTabs(): ProjectTab[] {
   const fileTabsByProject = useAppStore((s) => s.fileTabsByProject);
   const plansTabsByProject = useAppStore((s) => s.plansTabsByProject);
   const loopTabsByProject = useAppStore((s) => s.loopTabsByProject);
+  const agentTabsByProject = useAppStore((s) => s.agentTabsByProject);
   const project = useAppStore((s) => s.currentProject);
   return useMemo(() => {
     if (!project) {
@@ -932,13 +1024,18 @@ export function useProjectTabs(): ProjectTab[] {
       type: "loops",
       title: tab.title
     }));
+    const agentTabs: ProjectTab[] = (agentTabsByProject[project.path] ?? []).map((tab) => ({
+      id: tab.id,
+      type: "agent-launcher",
+      title: tab.title
+    }));
     const fileTabs: ProjectTab[] = (fileTabsByProject[project.path] ?? []).map((tab) => ({
       id: tab.id,
       type: "files",
       title: tab.title
     }));
-    return [...sessionTabs, ...loopTabs, ...plansTabs, ...fileTabs];
-  }, [sessions, fileTabsByProject, plansTabsByProject, loopTabsByProject, project]);
+    return [...sessionTabs, ...agentTabs, ...loopTabs, ...plansTabs, ...fileTabs];
+  }, [sessions, fileTabsByProject, plansTabsByProject, loopTabsByProject, agentTabsByProject, project]);
 }
 
 export function useActiveTabId(): string | null {

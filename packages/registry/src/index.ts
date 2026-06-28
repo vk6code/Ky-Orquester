@@ -11,6 +11,8 @@ export interface RegistryEntryDef {
   versionFlag?: string;
   installCmd?: string;
   updateCmd?: string;
+  /** Launch flag to attach an extra working directory (multi-root agents). */
+  addDirFlag?: string;
 }
 
 /**
@@ -36,7 +38,8 @@ export const REGISTRY = {
       bin: ["claude"] as const,
       versionFlag: "--version",
       installCmd: "npm install -g @anthropic-ai/claude-code",
-      updateCmd: "npm update -g @anthropic-ai/claude-code"
+      updateCmd: "npm update -g @anthropic-ai/claude-code",
+      addDirFlag: "--add-dir"
     },
     {
       id: "codex",

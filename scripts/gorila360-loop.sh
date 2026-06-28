@@ -16,8 +16,16 @@ PLAN_FILE="${3:-}"
 PHASE="${4:-}"
 AGENT="${5:-}"
 
-GORILA360_ROOT="/Users/victor/Documents/gorila360"
-WORKTREE_SCRIPT="/Users/victor/Documents/orquester/orquester/scripts/gorila360-worktree.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Configurable via env. Gorila360 es un preset opcional.
+GORILA360_ROOT="${ORQUESTER_GORILA360_ROOT:-}"
+WORKTREE_SCRIPT="${ORQUESTER_SCRIPTS_DIR:-$SCRIPT_DIR}/gorila360-worktree.sh"
+
+if [[ -z "$GORILA360_ROOT" ]]; then
+  echo "❌ ORQUESTER_GORILA360_ROOT no está definido (preset Gorila360 sin configurar)." >&2
+  exit 1
+fi
 
 if [[ -z "$REPO" || -z "$BRANCH" || -z "$PLAN_FILE" || -z "$PHASE" ]]; then
   echo "❌ Uso: $0 <repo> <branch> <plan-file> <phase> [agent]" >&2

@@ -1,17 +1,41 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { execFile } from "node:child_process";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { Broadcaster } from "./broadcaster";
 import type { SessionManager } from "./sessions";
 
 const execFileAsync = promisify(execFile);
 
-const GORILA360_ROOT = "/Users/victor/Documents/gorila360";
-const ORQUESTER_SCRIPTS = "/Users/victor/Documents/orquester/orquester/scripts";
-const WORKTREE_SCRIPT = `${ORQUESTER_SCRIPTS}/gorila360-worktree.sh`;
-const LOOP_AGENT_SCRIPT = `${ORQUESTER_SCRIPTS}/loop-run-agent.sh`;
+// Scripts directory (core: the generic loop runner needs loop-run-agent.sh).
+// Override with ORQUESTER_SCRIPTS_DIR; defaults to the repo's `scripts/` resolved
+// relative to this module (works from both src/ via tsx and dist/).
+const SCRIPTS_DIR =
+  process.env.ORQUESTER_SCRIPTS_DIR && process.env.ORQUESTER_SCRIPTS_DIR.length > 0
+    ? process.env.ORQUESTER_SCRIPTS_DIR
+    : fileURLToPath(new URL("../../../scripts", import.meta.url));
+const WORKTREE_SCRIPT = join(SCRIPTS_DIR, "gorila360-worktree.sh");
+const LOOP_AGENT_SCRIPT = join(SCRIPTS_DIR, "loop-run-agent.sh");
+
+// Gorila360 is now an OPTIONAL preset, not a hardcoded base (see SPEC-loop-targets).
+// Set ORQUESTER_GORILA360_ROOT to enable the /api/gorila360/* endpoints; when unset
+// they respond 501 NOT_CONFIGURED and only the generic /api/loops runner is available.
+const GORILA360_ROOT = process.env.ORQUESTER_GORILA360_ROOT ?? "";
+
+/** Guard for the Gorila360 preset endpoints. Returns the root, or null (after replying 501). */
+function requireGorila360Root(reply: FastifyReply): string | null {
+  if (!GORILA360_ROOT) {
+    void reply.code(501).send({
+      code: "GORILA360_NOT_CONFIGURED",
+      message:
+        "Gorila360 preset is not configured. Set ORQUESTER_GORILA360_ROOT, or use the generic /api/loops runner with an absolute target path."
+    });
+    return null;
+  }
+  return GORILA360_ROOT;
+}
 
 type Gorila360Repo = "backend" | "frontend";
 type Gorila360Agent = "claude" | "codex";
@@ -176,8 +200,8 @@ interface Gorila360Services {
   broadcaster: Broadcaster;
 }
 
-function worktreeDir(repo: string, branch: string): string {
-  return `${GORILA360_ROOT}/worktrees/${repo}/${branch.replace(/\//g, "-")}`;
+function worktreeDir(gorila360Root: string, repo: string, branch: string): string {
+  return `${gorila360Root}/worktrees/${repo}/${branch.replace(/\//g, "-")}`;
 }
 
 async function runWorktreeScript(args: readonly string[]): Promise<string> {
@@ -286,11 +310,12 @@ function buildPipelineCommand(pipeline: Gorila360Pipeline, args: readonly string
 
 async function launchPipelineSession(
   services: Gorila360Services,
+  gorila360Root: string,
   pipeline: Gorila360Pipeline,
   args: string[],
   projectPath?: string
 ): Promise<PipelineRunResponse> {
-  const cwd = GORILA360_ROOT;
+  const cwd = gorila360Root;
   const command = buildPipelineCommand(pipeline, args);
   const sessionProjectPath = projectPath ?? "gorila360";
 
@@ -333,6 +358,7 @@ export function registerGorila360Routes(app: FastifyInstance, services: Gorila36
   app.get<{ Querystring: { repo?: string } }>(
     "/api/gorila360/worktrees",
     async (request, reply): Promise<WorktreeListResponse[] | void> => {
+      if (!requireGorila360Root(reply)) return;
       const repo = request.query.repo ?? "all";
       if (repo !== "all" && !isValidRepo(repo)) {
         return reply.code(400).send({ code: "INVALID_REPO", message: "repo must be 'backend', 'frontend' or omitted." });
@@ -364,6 +390,7 @@ export function registerGorila360Routes(app: FastifyInstance, services: Gorila36
   app.post<{ Body: WorktreeCreateRequest }>(
     "/api/gorila360/worktrees",
     async (request, reply): Promise<{ ok: true; output: string } | void> => {
+      if (!requireGorila360Root(reply)) return;
       const { repo, branch, baseRef } = request.body ?? {};
       if (!isValidRepo(repo)) {
         return reply.code(400).send({ code: "INVALID_REPO", message: "repo must be 'backend' or 'frontend'." });
@@ -392,6 +419,7 @@ export function registerGorila360Routes(app: FastifyInstance, services: Gorila36
   app.delete<{ Body: WorktreeRemoveRequest }>(
     "/api/gorila360/worktrees",
     async (request, reply): Promise<{ ok: true; output: string } | void> => {
+      if (!requireGorila360Root(reply)) return;
       const { repo, branch } = request.body ?? {};
       if (!isValidRepo(repo)) {
         return reply.code(400).send({ code: "INVALID_REPO", message: "repo must be 'backend' or 'frontend'." });
@@ -467,6 +495,8 @@ export function registerGorila360Routes(app: FastifyInstance, services: Gorila36
   app.post<{ Body: LoopRunRequest & { repo?: Gorila360Repo; branch?: string } }>(
     "/api/gorila360/loops",
     async (request, reply): Promise<LoopRunResponse | void> => {
+      const gorila360Root = requireGorila360Root(reply);
+      if (!gorila360Root) return;
       const body = request.body ?? {};
       const repo = body.repo;
       const branch = body.branch;
@@ -492,8 +522,8 @@ export function registerGorila360Routes(app: FastifyInstance, services: Gorila36
       }
 
       const selectedAgent = agent ?? inferAgent(phase);
-      const targetPath = `${GORILA360_ROOT}/${repo}`;
-      const worktree = worktreeDir(repo, branch);
+      const targetPath = `${gorila360Root}/${repo}`;
+      const worktree = worktreeDir(gorila360Root, repo, branch);
 
       try {
         // Preserve the existing Gorila360 worktree bridge.
@@ -560,13 +590,15 @@ export function registerGorila360Routes(app: FastifyInstance, services: Gorila36
   app.post<{ Body: PipelineRunRequest }>(
     "/api/gorila360/pipelines/run",
     async (request, reply): Promise<PipelineRunResponse | void> => {
+      const gorila360Root = requireGorila360Root(reply);
+      if (!gorila360Root) return;
       const { args, projectPath } = request.body ?? {};
       if (args !== undefined && (!Array.isArray(args) || args.some((a) => typeof a !== "string"))) {
         return reply.code(400).send({ code: "INVALID_ARGS", message: "args must be an array of strings." });
       }
 
       try {
-        return await launchPipelineSession(services, "run", args ?? [], projectPath);
+        return await launchPipelineSession(services, gorila360Root, "run", args ?? [], projectPath);
       } catch (error) {
         return reply.code(500).send({
           code: "PIPELINE_ERROR",
@@ -580,13 +612,15 @@ export function registerGorila360Routes(app: FastifyInstance, services: Gorila36
   app.post<{ Body: PipelineRunRequest }>(
     "/api/gorila360/pipelines/backup",
     async (request, reply): Promise<PipelineRunResponse | void> => {
+      const gorila360Root = requireGorila360Root(reply);
+      if (!gorila360Root) return;
       const { args, projectPath } = request.body ?? {};
       if (args !== undefined && (!Array.isArray(args) || args.some((a) => typeof a !== "string"))) {
         return reply.code(400).send({ code: "INVALID_ARGS", message: "args must be an array of strings." });
       }
 
       try {
-        return await launchPipelineSession(services, "backup", args ?? [], projectPath);
+        return await launchPipelineSession(services, gorila360Root, "backup", args ?? [], projectPath);
       } catch (error) {
         return reply.code(500).send({
           code: "PIPELINE_ERROR",
@@ -600,13 +634,15 @@ export function registerGorila360Routes(app: FastifyInstance, services: Gorila36
   app.post<{ Body: PipelineRunRequest }>(
     "/api/gorila360/pipelines/review",
     async (request, reply): Promise<PipelineRunResponse | void> => {
+      const gorila360Root = requireGorila360Root(reply);
+      if (!gorila360Root) return;
       const { args, projectPath } = request.body ?? {};
       if (args !== undefined && (!Array.isArray(args) || args.some((a) => typeof a !== "string"))) {
         return reply.code(400).send({ code: "INVALID_ARGS", message: "args must be an array of strings." });
       }
 
       try {
-        return await launchPipelineSession(services, "review", args ?? [], projectPath);
+        return await launchPipelineSession(services, gorila360Root, "review", args ?? [], projectPath);
       } catch (error) {
         return reply.code(500).send({
           code: "PIPELINE_ERROR",
