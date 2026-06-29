@@ -13,6 +13,8 @@ interface Session {
   pty: IPty | null;
   buffer: string;
   emitter: EventEmitter;
+  /** Epoch ms of the last input or output byte; drives idle reaping. */
+  lastActivityAt: number;
 }
 
 export class SessionError extends Error {}
@@ -73,10 +75,17 @@ export class SessionManager {
       ...(extraDirs.length > 0 ? { extraDirs } : {})
     };
 
-    const session: Session = { summary, pty, buffer: "", emitter: new EventEmitter() };
+    const session: Session = {
+      summary,
+      pty,
+      buffer: "",
+      emitter: new EventEmitter(),
+      lastActivityAt: Date.now()
+    };
     this.sessions.set(id, session);
 
     pty.onData((data) => {
+      session.lastActivityAt = Date.now();
       session.buffer = (session.buffer + data).slice(-MAX_BUFFER);
       session.emitter.emit("output", data);
     });
@@ -107,7 +116,27 @@ export class SessionManager {
   }
 
   input(id: string, data: string): void {
-    this.sessions.get(id)?.pty?.write(data);
+    const session = this.sessions.get(id);
+    if (session?.pty) {
+      session.lastActivityAt = Date.now();
+      session.pty.write(data);
+    }
+  }
+
+  /**
+   * Kill and forget every session with no input/output for longer than
+   * `maxIdleMs`. Returns the reaped ids. Each reap emits "closed" via
+   * {@link close}, so connected clients drop the tab.
+   */
+  reapIdle(maxIdleMs: number): string[] {
+    const cutoff = Date.now() - maxIdleMs;
+    const stale = [...this.sessions.values()]
+      .filter((s) => s.lastActivityAt < cutoff)
+      .map((s) => s.summary.id);
+    for (const id of stale) {
+      this.close(id);
+    }
+    return stale;
   }
 
   resize(id: string, cols: number, rows: number): void {

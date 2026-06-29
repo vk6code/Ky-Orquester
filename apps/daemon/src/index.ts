@@ -202,7 +202,25 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<Run
 
   await startHttp();
 
+  // Reap terminals with no input/output for too long (default 10h). Configure
+  // with ORQUESTER_SESSION_IDLE_MS; set to 0 to disable reaping entirely.
+  const idleMs = parseIdleMs(env.ORQUESTER_SESSION_IDLE_MS);
+  let reapTimer: NodeJS.Timeout | undefined;
+  if (idleMs > 0) {
+    const sweepMs = Math.max(60_000, Math.min(10 * 60_000, idleMs));
+    reapTimer = setInterval(() => {
+      const reaped = sessions.reapIdle(idleMs);
+      if (reaped.length > 0) {
+        console.log(`Reaped ${reaped.length} idle session(s) (>${Math.round(idleMs / 3_600_000)}h)`);
+      }
+    }, sweepMs);
+    reapTimer.unref();
+  }
+
   const stop = async () => {
+    if (reapTimer) {
+      clearInterval(reapTimer);
+    }
     sessions.closeAll();
     await stopHttp();
     await unixServer.close().catch(() => undefined);
@@ -903,6 +921,20 @@ async function readHiddenFile(file: string): Promise<HiddenConfig> {
   } catch {
     return createDefaultHiddenConfig();
   }
+}
+
+const DEFAULT_SESSION_IDLE_MS = 10 * 60 * 60 * 1000; // 10h
+
+/** Parse ORQUESTER_SESSION_IDLE_MS; default 10h, 0 disables reaping. */
+function parseIdleMs(raw: string | undefined): number {
+  if (raw === undefined || raw === "") {
+    return DEFAULT_SESSION_IDLE_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_SESSION_IDLE_MS;
+  }
+  return Math.floor(parsed);
 }
 
 async function writeJsonFile(file: string, value: unknown): Promise<void> {
