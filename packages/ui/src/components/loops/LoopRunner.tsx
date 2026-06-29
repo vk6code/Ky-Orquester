@@ -19,6 +19,7 @@ import { useAppStore } from "../../store/app";
 import type { AgentLoopParticipant, AgentSkill, LoopRunResponse, LoopTargetKind } from "../../types";
 import { Button, Input } from "../ui";
 import { FolderPickerModal } from "../files";
+import { genId } from "../../lib/id";
 
 const AGENTS = [
   { id: "claude" as const, name: "Claude Code" },
@@ -33,6 +34,35 @@ const AGENT_NAME: Record<string, string> = Object.fromEntries(AGENTS.map((a) => 
 
 /** Agents offered for the single-shot loop (only claude/codex are wired there). */
 const SINGLE_AGENTS = AGENTS.filter((a) => a.id === "claude" || a.id === "codex");
+
+/** Preset relay roles; picking one prefills the participant's skill brief. */
+const ROLE_PRESETS: { role: string; skill: string }[] = [
+  { role: "Planificador", skill: "Analiza la tarea y produce un plan claro: pasos, archivos a tocar y riesgos. No implementes; deja el plan listo para el implementador." },
+  { role: "Arquitecto", skill: "Decide el diseño y la estructura antes de implementar: módulos, contratos/interfaces y trade-offs. Documenta las decisiones." },
+  { role: "Implementador", skill: "Implementa los cambios de código del plan. Código real, mínimo y correcto; no te salgas del alcance acordado." },
+  { role: "Revisor", skill: "Revisa lo hecho: correctitud, bugs, estilo y que cumpla el plan. Señala problemas concretos y corrige los triviales." },
+  { role: "Tester", skill: "Escribe y ejecuta pruebas para validar los cambios; reporta los fallos encontrados con cómo reproducirlos." },
+  { role: "Depurador", skill: "Reproduce y arregla el bug descrito; explica la causa raíz y verifica que queda resuelto." },
+  { role: "Documentador", skill: "Documenta los cambios: README, comentarios de código y changelog donde corresponda." }
+];
+
+const ROLE_BY_NAME = new Map(ROLE_PRESETS.map((r) => [r.role, r]));
+
+/** Local participant with a stable client id + custom-role flag (stripped on submit). */
+interface RelayParticipant {
+  uid: string;
+  agent: string;
+  role: string;
+  skill: string;
+  customRole?: boolean;
+}
+
+const newParticipant = (agent: string, role = "", skill = ""): RelayParticipant => ({
+  uid: genId(),
+  agent,
+  role,
+  skill
+});
 
 type Mode = "relay" | "single";
 
@@ -91,9 +121,9 @@ const RelayPanel: React.FC = () => {
 
   const [path, setPath] = useState(currentProject?.path ?? "");
   const [task, setTask] = useState("");
-  const [participants, setParticipants] = useState<AgentLoopParticipant[]>([
-    { agent: "claude", role: "Implementador", skill: "" },
-    { agent: "codex", role: "Revisor", skill: "" }
+  const [participants, setParticipants] = useState<RelayParticipant[]>([
+    newParticipant("claude", "Implementador", ROLE_BY_NAME.get("Implementador")?.skill ?? ""),
+    newParticipant("codex", "Revisor", ROLE_BY_NAME.get("Revisor")?.skill ?? "")
   ]);
   const [activeBlockIds, setActiveBlockIds] = useState<string[]>([]);
   const [coordinationDir, setCoordinationDir] = useState("");
@@ -168,11 +198,20 @@ const RelayPanel: React.FC = () => {
   const canStart = Boolean(path.trim() && task.trim() && participants.length > 0 && !running);
 
   const addParticipant = (agent: string) =>
-    setParticipants((prev) => [...prev, { agent, role: "", skill: "" }]);
-  const updateParticipant = (index: number, patch: Partial<AgentLoopParticipant>) =>
+    setParticipants((prev) => [...prev, newParticipant(agent)]);
+  const updateParticipant = (index: number, patch: Partial<RelayParticipant>) =>
     setParticipants((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)));
   const removeParticipant = (index: number) =>
     setParticipants((prev) => prev.filter((_, i) => i !== index));
+  // Role dropdown change: a preset prefills the skill brief; "custom" reveals a text field.
+  const changeRole = (index: number, value: string) => {
+    if (value === "__custom__") {
+      updateParticipant(index, { customRole: true });
+      return;
+    }
+    const preset = ROLE_BY_NAME.get(value);
+    updateParticipant(index, { customRole: false, role: value, skill: preset?.skill ?? participants[index]?.skill ?? "" });
+  };
   const toggleBlock = (id: string) =>
     setActiveBlockIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
@@ -337,9 +376,13 @@ const RelayPanel: React.FC = () => {
               <p className="text-xs text-neutral-600">Add at least one participant…</p>
             )}
             <div className="space-y-2">
-              {participants.map((p, index) => (
+              {participants.map((p, index) => {
+                const isPreset = ROLE_BY_NAME.has(p.role);
+                const selectValue = p.customRole || (p.role && !isPreset) ? "__custom__" : p.role;
+                const showCustom = p.customRole || Boolean(p.role && !isPreset);
+                return (
                 <div
-                  key={index}
+                  key={p.uid}
                   className="space-y-2 rounded-lg border border-neutral-800 bg-neutral-950/50 p-2.5"
                 >
                   <div className="flex items-center gap-2">
@@ -358,11 +401,26 @@ const RelayPanel: React.FC = () => {
                       <X size={13} />
                     </button>
                   </div>
-                  <Input
-                    value={p.role ?? ""}
-                    onChange={(event) => updateParticipant(index, { role: event.target.value })}
-                    placeholder="Role (e.g. Implementer, Reviewer, Tester)"
-                  />
+                  <select
+                    value={selectValue}
+                    onChange={(event) => changeRole(index, event.target.value)}
+                    className="h-9 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-100 outline-none focus:ring-1 focus:ring-neutral-500"
+                  >
+                    <option value="">Role…</option>
+                    {ROLE_PRESETS.map((r) => (
+                      <option key={r.role} value={r.role}>
+                        {r.role}
+                      </option>
+                    ))}
+                    <option value="__custom__">Custom…</option>
+                  </select>
+                  {showCustom && (
+                    <Input
+                      value={p.role ?? ""}
+                      onChange={(event) => updateParticipant(index, { role: event.target.value, customRole: true })}
+                      placeholder="Custom role name"
+                    />
+                  )}
                   {(skillsByAgent[p.agent]?.length ?? 0) > 0 && (
                     <select
                       value=""
@@ -387,7 +445,8 @@ const RelayPanel: React.FC = () => {
                     className="w-full resize-y rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:ring-1 focus:ring-neutral-500"
                   />
                 </div>
-              ))}
+                );
+              })}
             </div>
             <div className="flex flex-wrap gap-1.5">
               {AGENTS.map((agent) => (
