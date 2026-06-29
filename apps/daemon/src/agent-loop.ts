@@ -7,6 +7,8 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import type {
   AgentLoopParticipant,
+  AgentLoopRefineRequest,
+  AgentLoopRefineResponse,
   AgentLoopRequest,
   AgentLoopResponse,
   AgentLoopStatus
@@ -82,16 +84,21 @@ function composeTurnPrompt(
   baton: string,
   participant: AgentLoopParticipant,
   handoffFile: string,
-  round: number
+  round: number,
+  codeDirs: string[]
 ): string {
   const role = participant.role?.trim();
   const skill = participant.skill?.trim();
+  const dirs =
+    codeDirs.length > 1
+      ? `\nPuedes modificar código en estas carpetas:\n${codeDirs.map((d) => `  - ${d}`).join("\n")}\n`
+      : "";
   return `${baton}
 
 ---
 ## TU TURNO (turno ${round + 1})
 - Agente: ${participant.agent}
-${role ? `- Rol: ${role}\n` : ""}${skill ? `- Skill / instrucciones: ${skill}\n` : ""}
+${role ? `- Rol: ${role}\n` : ""}${skill ? `- Skill / instrucciones: ${skill}\n` : ""}${dirs}
 Haz **el siguiente paso concreto** de la tarea según tu rol (no rehagas lo ya hecho).
 Aplica los cambios reales en el código del proyecto.
 
@@ -141,13 +148,15 @@ async function driveLoop(
   loopId: string,
   sessionId: string,
   projectDir: string,
+  extraDirs: string[],
+  loopDir: string,
   participants: AgentLoopParticipant[],
   maxRounds: number,
   snapshot: boolean
 ): Promise<void> {
   const { sessions, broadcaster } = services;
-  const loopDir = join(services.loopsDir, loopId);
   const batonPath = join(loopDir, "baton.md");
+  const codeDirs = [projectDir, ...extraDirs];
 
   const publish = (status: AgentLoopStatus) =>
     broadcaster.publish(CHANNEL, status.state === "done" ? "agent-loop.done" : "agent-loop.turn", status);
@@ -191,12 +200,12 @@ async function driveLoop(
     const doneFile = join(loopDir, `done-${round}`);
 
     const baton = await readFile(batonPath, "utf8").catch(() => "");
-    await writeFile(promptFile, composeTurnPrompt(baton, participant, handoffFile, round), "utf8");
+    await writeFile(promptFile, composeTurnPrompt(baton, participant, handoffFile, round, codeDirs), "utf8");
 
     publish({ loopId, sessionId, round, agent: participant.agent, role: participant.role, state: "running" });
 
     const command =
-      [TURN_SCRIPT, projectDir, participant.agent, promptFile, outFile, doneFile, String(round)]
+      [TURN_SCRIPT, projectDir, participant.agent, promptFile, outFile, doneFile, String(round), ...extraDirs]
         .map((part) => JSON.stringify(part))
         .join(" ") + "\n";
     sessions.input(sessionId, command);
@@ -312,6 +321,14 @@ export function registerAgentLoopRoutes(app: FastifyInstance, services: AgentLoo
           message: `participants must be a non-empty list of { agent, role?, skill? } with agent one of: ${[...SUPPORTED_AGENTS].join(", ")}.`
         });
       }
+      const extraDirs = Array.isArray(body.extraDirs)
+        ? body.extraDirs.filter((d): d is string => isAbsolutePath(d))
+        : [];
+      if (body.coordinationDir !== undefined && !isAbsolutePath(body.coordinationDir)) {
+        return reply
+          .code(400)
+          .send({ code: "INVALID_COORDINATION_DIR", message: "coordinationDir must be an absolute path." });
+      }
       const rounds = Number.isFinite(maxRounds) && maxRounds > 0 ? Math.min(Math.floor(maxRounds), 50) : 1;
 
       if (!(await fileExists(path))) {
@@ -321,7 +338,8 @@ export function registerAgentLoopRoutes(app: FastifyInstance, services: AgentLoo
       const snapshot = body.gitSnapshot === true && (await isGitRepo(path));
 
       const loopId = randomUUID();
-      const loopDir = join(services.loopsDir, loopId);
+      const coordBase = body.coordinationDir ?? services.loopsDir;
+      const loopDir = join(coordBase, loopId);
       const batonPath = join(loopDir, "baton.md");
       try {
         await mkdir(loopDir, { recursive: true });
@@ -353,7 +371,7 @@ export function registerAgentLoopRoutes(app: FastifyInstance, services: AgentLoo
       });
 
       // Drive the relay in the background; progress streams over CHANNEL.
-      void driveLoop(services, loopId, session.id, path, participants, rounds, snapshot);
+      void driveLoop(services, loopId, session.id, path, extraDirs, loopDir, participants, rounds, snapshot);
 
       const response: AgentLoopResponse = {
         ok: true,
@@ -376,6 +394,59 @@ export function registerAgentLoopRoutes(app: FastifyInstance, services: AgentLoo
         loop.cancelled = true;
       }
       return { ok: true };
+    }
+  );
+
+  // Pre-loop step: an INTERACTIVE pi session that interviews the user to turn a
+  // rough task into a well-defined spec, written to refinedPath. The client opens
+  // the session tab, the user chats, and polls refinedPath until pi writes it.
+  app.post<{ Body: AgentLoopRefineRequest }>(
+    "/api/agent-loops/refine",
+    async (request, reply): Promise<AgentLoopRefineResponse | void> => {
+      const body = request.body ?? ({} as AgentLoopRefineRequest);
+      const { path, task, projectPath } = body;
+      if (!isAbsolutePath(path)) {
+        return reply.code(400).send({ code: "INVALID_PATH", message: "path must be an absolute path." });
+      }
+      if (typeof task !== "string" || task.trim().length === 0) {
+        return reply.code(400).send({ code: "INVALID_TASK", message: "task is required." });
+      }
+      if (body.coordinationDir !== undefined && !isAbsolutePath(body.coordinationDir)) {
+        return reply
+          .code(400)
+          .send({ code: "INVALID_COORDINATION_DIR", message: "coordinationDir must be an absolute path." });
+      }
+      if (!(await fileExists(path))) {
+        return reply.code(400).send({ code: "PATH_NOT_FOUND", message: `Path does not exist: ${path}` });
+      }
+
+      const coordBase = body.coordinationDir ?? services.loopsDir;
+      const refineDir = join(coordBase, `refine-${randomUUID()}`);
+      const refinedPath = join(refineDir, "refined-prompt.md");
+      try {
+        await mkdir(refineDir, { recursive: true });
+      } catch (error) {
+        return reply.code(500).send({
+          code: "REFINE_SETUP_ERROR",
+          message: error instanceof Error ? error.message : "Failed to prepare refine session."
+        });
+      }
+
+      const interview = `Eres un asistente que AFINA una tarea de programación antes de pasarla a un equipo de agentes (planificador → implementador → revisor). Entrevista al usuario por turnos: hazle preguntas concretas (alcance, criterios de aceptación, restricciones, ficheros/módulos afectados, casos borde) hasta tener un spec claro. NO escribas código. Cuando el spec esté bien definido y el usuario confirme, escribe el spec final (objetivo, alcance, criterios de aceptación, pasos sugeridos) en el fichero ${refinedPath} y avisa al usuario de que ya está listo.\n\nTarea inicial del usuario:\n${task.trim()}`;
+
+      const session = sessions.create({
+        kind: "shell",
+        refId: "bash",
+        projectPath: projectPath ?? path,
+        cwd: path,
+        cols: 120,
+        rows: 40,
+        title: "Refine prompt · pi"
+      });
+      // Launch pi interactively, seeded with the interview instruction.
+      sessions.input(session.id, `pi ${JSON.stringify(interview)}\n`);
+
+      return { ok: true, sessionId: session.id, refinedPath };
     }
   );
 }

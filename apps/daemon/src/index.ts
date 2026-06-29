@@ -1,4 +1,5 @@
 import type {
+  AgentSkill,
   CreateProjectRequest,
   CreateSessionRequest,
   CreateWorkspaceRequest,
@@ -33,6 +34,7 @@ import {
   type DaemonPaths,
   type HiddenConfig,
   type LabelsConfig,
+  type LoopBlocksConfig,
   type RemoteConnectionConfig,
   type RemotesConfig,
   appConfigPath,
@@ -41,16 +43,19 @@ import {
   createDefaultDaemonConfig,
   createDefaultHiddenConfig,
   createDefaultLabelsConfig,
+  createDefaultLoopBlocksConfig,
   createDefaultRemotesConfig,
   dailyLogFile,
   expandVars,
   hiddenConfigPath,
   labelsConfigPath,
+  loopBlocksConfigPath,
   loopsDirPath,
   parseAppConfig,
   parseDaemonConfig,
   parseHiddenConfig,
   parseLabelsConfig,
+  parseLoopBlocksConfig,
   parseRemotesConfig,
   remotesConfigPath,
   resolveDaemonPaths
@@ -78,6 +83,7 @@ interface ResolvedPaths {
   labelsFile: string;
   hiddenFile: string;
   loopsDir: string;
+  loopBlocksFile: string;
   workspacesDir: string;
   logsDir: string;
   vars: ConfigVars;
@@ -123,6 +129,7 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<Run
     labelsFile: labelsConfigPath(paths.baseDir),
     hiddenFile: hiddenConfigPath(paths.baseDir),
     loopsDir: loopsDirPath(paths.baseDir),
+    loopBlocksFile: loopBlocksConfigPath(paths.baseDir),
     workspacesDir: expandVars(config.workspacesDir, paths.vars),
     logsDir: expandVars(config.logsDir, paths.vars),
     vars: paths.vars
@@ -549,6 +556,33 @@ function createServer(
     }
   });
 
+  // Reusable named code-folder blocks for the relay loop runner (loop-blocks.json).
+  app.get(
+    "/api/config/loop-blocks",
+    async (): Promise<LoopBlocksConfig["blocks"]> =>
+      (await readLoopBlocksFile(resolved.loopBlocksFile)).blocks
+  );
+
+  app.put("/api/config/loop-blocks", async (request, reply): Promise<LoopBlocksConfig["blocks"] | void> => {
+    try {
+      const parsed = parseLoopBlocksConfig({
+        version: 1,
+        blocks: Array.isArray(request.body) ? request.body : []
+      });
+      await writeJsonFile(resolved.loopBlocksFile, parsed);
+      return parsed.blocks;
+    } catch {
+      return reply.code(400).send({ code: "INVALID_CONFIG", message: "Invalid loop-blocks config." });
+    }
+  });
+
+  // Skills installed for a code agent (populates the relay's per-participant
+  // skill picker). Best-effort + agent-specific; empty when none are installed.
+  app.get<{ Params: { id: string } }>(
+    "/api/agents/:id/skills",
+    async (request): Promise<AgentSkill[]> => scanAgentSkills(request.params.id)
+  );
+
   // File browser: list a directory.
   app.get<{ Querystring: { path?: string } }>(
     "/api/fs",
@@ -928,6 +962,46 @@ async function readHiddenFile(file: string): Promise<HiddenConfig> {
   } catch {
     return createDefaultHiddenConfig();
   }
+}
+
+async function readLoopBlocksFile(file: string): Promise<LoopBlocksConfig> {
+  try {
+    return parseLoopBlocksConfig(JSON.parse(await readFile(file, "utf8")));
+  } catch {
+    return createDefaultLoopBlocksConfig();
+  }
+}
+
+/**
+ * Discover skills installed for a code agent. Agent-specific and best-effort:
+ * - claude: scans ~/.claude/skills/<name>/SKILL.md (name/description frontmatter).
+ * Other agents store skills differently (gemini `skills list`, pi/kimi by dir);
+ * they return [] until their install locations are wired here.
+ */
+async function scanAgentSkills(agentId: string): Promise<AgentSkill[]> {
+  if (agentId !== "claude") {
+    return [];
+  }
+  const skillsRoot = join(homedir(), ".claude", "skills");
+  const dirents = await readdir(skillsRoot, { withFileTypes: true }).catch(() => null);
+  if (!dirents) {
+    return [];
+  }
+  const skills: AgentSkill[] = [];
+  for (const dirent of dirents) {
+    if (!dirent.isDirectory()) {
+      continue;
+    }
+    const skillFile = join(skillsRoot, dirent.name, "SKILL.md");
+    const raw = await readFile(skillFile, "utf8").catch(() => null);
+    if (raw === null) {
+      continue;
+    }
+    const name = /^name:\s*(.+)$/m.exec(raw)?.[1]?.trim() || dirent.name;
+    const description = /^description:\s*(.+)$/m.exec(raw)?.[1]?.trim();
+    skills.push({ name, description, source: skillFile });
+  }
+  return skills.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 const DEFAULT_SESSION_IDLE_MS = 10 * 60 * 60 * 1000; // 10h

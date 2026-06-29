@@ -105,6 +105,14 @@ export interface LoopRunResponse {
  * baton for the next agent. The relay stops when an agent emits the
  * `<<LOOP_DONE>>` token or after `maxRounds` full cycles through `agents`.
  */
+/** A skill installed for a code agent (e.g. a Claude Code skill). */
+export interface AgentSkill {
+  name: string;
+  description?: string;
+  /** Where it was discovered (path or command), for tooltips/debugging. */
+  source?: string;
+}
+
 /** One participant in a relay: an agent playing a role with a skill brief. */
 export interface AgentLoopParticipant {
   /** Agent refId, e.g. "claude" | "codex" | "opencode" | "kimi" | "pi" | "gemini". */
@@ -116,8 +124,14 @@ export interface AgentLoopParticipant {
 }
 
 export interface AgentLoopRequest {
-  /** Absolute path the agents run in (the project; they edit real code here). */
+  /** Primary absolute path agents run in (cwd); they edit real code here. */
   path: string;
+  /** Extra code folders agents may modify (passed via --add-dir where supported,
+   * and listed in the prompt for every agent). */
+  extraDirs?: string[];
+  /** Where coordination files (baton/handoffs) live; defaults to Orquester's
+   * work folder. Lets you keep the loop's chatter out of the project. */
+  coordinationDir?: string;
   /** The task to accomplish, handed between participants. */
   task: string;
   /** Ordered participants to rotate through. */
@@ -141,6 +155,26 @@ export interface AgentLoopResponse {
   maxRounds: number;
   /** The shared baton file path (in Orquester's work folder, not the project). */
   batonPath: string;
+}
+
+/** Kick off an interactive pi session that interviews the user to refine a
+ * rough task into a well-defined spec, written to a file the relay then uses. */
+export interface AgentLoopRefineRequest {
+  /** Working directory pi runs in. */
+  path: string;
+  /** The rough task to refine. */
+  task: string;
+  projectPath?: string;
+  /** Where the refined spec file is written; defaults to Orquester's work folder. */
+  coordinationDir?: string;
+}
+
+export interface AgentLoopRefineResponse {
+  ok: true;
+  /** Interactive pi session the user chats with. */
+  sessionId: string;
+  /** File pi writes the refined spec to; poll it to know when it's ready. */
+  refinedPath: string;
 }
 
 /** Live status of an agent relay loop, broadcast on the "agent-loops" channel. */

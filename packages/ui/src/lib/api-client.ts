@@ -1,6 +1,9 @@
 import type {
+  AgentLoopRefineRequest,
+  AgentLoopRefineResponse,
   AgentLoopRequest,
   AgentLoopResponse,
+  AgentSkill,
   AgentSummary,
   AuthInfoResponse,
   CreateProjectRequest,
@@ -21,7 +24,7 @@ import type {
   SessionSummary,
   WorkspaceSummary
 } from "@orquester/api";
-import type { AppConfig, DaemonConfig, RemoteConnectionConfig } from "@orquester/config";
+import type { AppConfig, DaemonConfig, LoopBlock, RemoteConnectionConfig } from "@orquester/config";
 import type { Gorila360LoopRunRequest, Gorila360LoopRunResponse, Gorila360PlanSummary, UiConnection } from "../types";
 import type {
   StreamHandle,
@@ -289,6 +292,24 @@ export class ApiClient {
 
   stopAgentLoop(loopId: string): Promise<{ ok: true }> {
     return this.send("POST", `/api/agent-loops/${encodeURIComponent(loopId)}/stop`, {});
+  }
+
+  refineLoopPrompt(req: AgentLoopRefineRequest): Promise<AgentLoopRefineResponse> {
+    return this.send("POST", "/api/agent-loops/refine", { body: req });
+  }
+
+  // Reusable code-folder blocks for the relay loop runner.
+  listLoopBlocks(signal?: AbortSignal): Promise<LoopBlock[]> {
+    return this.send("GET", "/api/config/loop-blocks", { signal });
+  }
+
+  saveLoopBlocks(blocks: LoopBlock[]): Promise<LoopBlock[]> {
+    return this.send("PUT", "/api/config/loop-blocks", { body: blocks });
+  }
+
+  // Skills installed for a code agent (for the per-participant skill picker).
+  listAgentSkills(agentId: string, signal?: AbortSignal): Promise<AgentSkill[]> {
+    return this.send("GET", `/api/agents/${encodeURIComponent(agentId)}/skills`, { signal });
   }
 }
 

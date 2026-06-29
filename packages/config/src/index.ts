@@ -98,6 +98,10 @@ export function loopsDirPath(baseDir: string): string {
   return joinPath(appConfigDir(baseDir), "loops");
 }
 
+export function loopBlocksConfigPath(baseDir: string): string {
+  return joinPath(appConfigDir(baseDir), "loop-blocks.json");
+}
+
 export function daemonConfigPath(baseDir: string): string {
   return joinPath(daemonConfigDir(baseDir), "daemon.json");
 }
@@ -309,6 +313,31 @@ export function createDefaultHiddenConfig(): HiddenConfig {
 
 export function parseHiddenConfig(value: unknown): HiddenConfig {
   return hiddenConfigSchema.parse(value);
+}
+
+// loop-blocks.json (reusable named code-folder blocks for the relay loop runner;
+// each block is a labelled directory the agents may modify, toggled per loop)
+
+export const loopBlockSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  path: z.string().min(1)
+});
+
+export const loopBlocksConfigSchema = z.object({
+  version: z.literal(1).default(1),
+  blocks: z.array(loopBlockSchema).default([])
+});
+
+export type LoopBlock = z.infer<typeof loopBlockSchema>;
+export type LoopBlocksConfig = z.infer<typeof loopBlocksConfigSchema>;
+
+export function createDefaultLoopBlocksConfig(): LoopBlocksConfig {
+  return loopBlocksConfigSchema.parse({ blocks: [] });
+}
+
+export function parseLoopBlocksConfig(value: unknown): LoopBlocksConfig {
+  return loopBlocksConfigSchema.parse(value);
 }
 
 // ClientConfig — what the daemon reports about how to reach itself.}

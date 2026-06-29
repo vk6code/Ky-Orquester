@@ -11,9 +11,12 @@ import type { HttpClient } from "../lib/http-client";
 import type { Transporter } from "../lib/transporter";
 import { workspaceService } from "../services";
 import type {
+  AgentLoopRefineRequest,
+  AgentLoopRefineResponse,
   AgentLoopRequest,
   AgentLoopResponse,
   AgentLoopStatus,
+  LoopBlock,
   ConnectionStatus,
   EventMessage,
   ProjectSummary,
@@ -217,6 +220,8 @@ export interface AppState {
   hidden: string[];
   /** Live status of the current/last multi-agent relay loop (null if none). */
   agentLoop: AgentLoopStatus | null;
+  /** Reusable code-folder blocks for the relay loop runner. */
+  loopBlocks: LoopBlock[];
 
   /** All daemon sessions; a project's sessions are its tabs. */
   sessions: SessionSummary[];
@@ -280,6 +285,15 @@ export interface AppState {
   startAgentLoop: (req: AgentLoopRequest) => Promise<AgentLoopResponse>;
   /** Ask the active relay loop to stop after the current turn. */
   stopAgentLoop: () => Promise<void>;
+  /** Start the interactive pi prompt-refinement pre-step. */
+  refineLoopPrompt: (req: AgentLoopRefineRequest) => Promise<AgentLoopRefineResponse>;
+
+  /** Load reusable relay code-folder blocks for the active daemon. */
+  loadLoopBlocks: () => Promise<void>;
+  /** Add a named code-folder block (persisted). */
+  addLoopBlock: (label: string, path: string) => Promise<void>;
+  /** Remove a code-folder block (persisted). */
+  removeLoopBlock: (id: string) => Promise<void>;
 
   loadSessions: () => Promise<void>;
   loadRegistry: () => Promise<void>;
@@ -376,6 +390,7 @@ export const useAppStore = create<AppState>()(
   labels: {},
   hidden: [],
   agentLoop: null,
+  loopBlocks: [],
   sessions: [],
   fileTabsByProject: {},
   plansTabsByProject: {},
@@ -440,7 +455,8 @@ export const useAppStore = create<AppState>()(
         get().loadSessions(),
         get().loadRegistry(),
         get().loadLabels(),
-        get().loadHidden()
+        get().loadHidden(),
+        get().loadLoopBlocks()
       ]);
     } catch {
       // signOut is called by the loader that received 401.
@@ -640,6 +656,7 @@ export const useAppStore = create<AppState>()(
       projects: [],
       labels: {},
       hidden: [],
+      loopBlocks: [],
       sessions: [],
       fileTabsByProject: {},
       plansTabsByProject: {},
@@ -850,6 +867,47 @@ export const useAppStore = create<AppState>()(
       return;
     }
     await api.stopAgentLoop(loop.loopId).catch(() => undefined);
+  },
+
+  refineLoopPrompt: async (req) => {
+    const api = get().api;
+    if (!api) {
+      throw new Error("Not connected.");
+    }
+    return api.refineLoopPrompt(req);
+  },
+
+  loadLoopBlocks: async () => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    try {
+      set({ loopBlocks: await api.listLoopBlocks() });
+    } catch {
+      set({ loopBlocks: [] });
+    }
+  },
+
+  addLoopBlock: async (label, path) => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    const block: LoopBlock = { id: genId(), label: label.trim() || path, path: path.trim() };
+    const next = [...get().loopBlocks, block];
+    set({ loopBlocks: next });
+    await api.saveLoopBlocks(next).catch(() => undefined);
+  },
+
+  removeLoopBlock: async (id) => {
+    const api = get().api;
+    if (!api) {
+      return;
+    }
+    const next = get().loopBlocks.filter((b) => b.id !== id);
+    set({ loopBlocks: next });
+    await api.saveLoopBlocks(next).catch(() => undefined);
   },
 
   loadSessions: async () => {

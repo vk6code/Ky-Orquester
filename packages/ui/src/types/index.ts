@@ -79,5 +79,9 @@ export type {
   AgentLoopRequest,
   AgentLoopResponse,
   AgentLoopStatus,
-  AgentLoopParticipant
+  AgentLoopParticipant,
+  AgentLoopRefineRequest,
+  AgentLoopRefineResponse,
+  AgentSkill
 } from "@orquester/api";
+export type { LoopBlock } from "@orquester/config";

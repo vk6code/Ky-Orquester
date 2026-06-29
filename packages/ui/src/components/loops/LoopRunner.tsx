@@ -2,19 +2,23 @@ import React, { useEffect, useState } from "react";
 import {
   ExternalLink,
   FolderOpen,
+  FolderPlus,
   GitBranch,
   Loader2,
   Play,
   Plus,
   Repeat,
+  Sparkles,
   Square,
+  Trash2,
   Workflow,
   X
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { useAppStore } from "../../store/app";
-import type { AgentLoopParticipant, LoopRunResponse, LoopTargetKind } from "../../types";
+import type { AgentLoopParticipant, AgentSkill, LoopRunResponse, LoopTargetKind } from "../../types";
 import { Button, Input } from "../ui";
+import { FolderPickerModal } from "../files";
 
 const AGENTS = [
   { id: "claude" as const, name: "Claude Code" },
@@ -74,11 +78,16 @@ export const LoopRunner: React.FC = () => {
 
 /** New multi-agent relay: hand a task between agents in turn until done. */
 const RelayPanel: React.FC = () => {
+  const api = useAppStore((s) => s.api);
   const currentProject = useAppStore((s) => s.currentProject);
   const activateTab = useAppStore((s) => s.activateTab);
   const startAgentLoop = useAppStore((s) => s.startAgentLoop);
   const stopAgentLoop = useAppStore((s) => s.stopAgentLoop);
+  const refineLoopPrompt = useAppStore((s) => s.refineLoopPrompt);
   const agentLoop = useAppStore((s) => s.agentLoop);
+  const loopBlocks = useAppStore((s) => s.loopBlocks);
+  const addLoopBlock = useAppStore((s) => s.addLoopBlock);
+  const removeLoopBlock = useAppStore((s) => s.removeLoopBlock);
 
   const [path, setPath] = useState(currentProject?.path ?? "");
   const [task, setTask] = useState("");
@@ -86,10 +95,16 @@ const RelayPanel: React.FC = () => {
     { agent: "claude", role: "Implementador", skill: "" },
     { agent: "codex", role: "Revisor", skill: "" }
   ]);
+  const [activeBlockIds, setActiveBlockIds] = useState<string[]>([]);
+  const [coordinationDir, setCoordinationDir] = useState("");
   const [gitSnapshot, setGitSnapshot] = useState(false);
   const [maxRounds, setMaxRounds] = useState(3);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [skillsByAgent, setSkillsByAgent] = useState<Record<string, AgentSkill[]>>({});
+  const [blockPicker, setBlockPicker] = useState(false);
+  const [refining, setRefining] = useState(false);
+  const [pendingRefine, setPendingRefine] = useState<string | null>(null);
 
   useEffect(() => {
     if (!path && currentProject?.path) {
@@ -97,7 +112,59 @@ const RelayPanel: React.FC = () => {
     }
   }, [currentProject?.path, path]);
 
+  // Load installed skills for each agent in the roster (for the skill picker).
+  useEffect(() => {
+    if (!api) return;
+    const agents = [...new Set(participants.map((p) => p.agent))];
+    let cancelled = false;
+    (async () => {
+      for (const a of agents) {
+        if (skillsByAgent[a]) continue;
+        const skills = await api.listAgentSkills(a).catch(() => [] as AgentSkill[]);
+        if (!cancelled) setSkillsByAgent((prev) => ({ ...prev, [a]: skills }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [participants, api, skillsByAgent]);
+
+  // Poll the refined-spec file pi writes; when it appears, load it as the task.
+  useEffect(() => {
+    if (!pendingRefine || !api) return;
+    let cancelled = false;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (cancelled) return;
+      attempts += 1;
+      const content = await api
+        .readFile(pendingRefine)
+        .then((r) => r?.content?.trim() ?? "")
+        .catch(() => "");
+      if (cancelled) return;
+      if (content) {
+        setTask(content);
+        setPendingRefine(null);
+        setRefining(false);
+        return;
+      }
+      if (attempts > 400) {
+        setPendingRefine(null);
+        setRefining(false);
+        return;
+      }
+      timer = setTimeout(tick, 3000);
+    };
+    timer = setTimeout(tick, 3000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [pendingRefine, api]);
+
   const running = agentLoop?.state === "running";
+  const extraDirs = loopBlocks.filter((b) => activeBlockIds.includes(b.id)).map((b) => b.path);
   const canStart = Boolean(path.trim() && task.trim() && participants.length > 0 && !running);
 
   const addParticipant = (agent: string) =>
@@ -106,6 +173,27 @@ const RelayPanel: React.FC = () => {
     setParticipants((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)));
   const removeParticipant = (index: number) =>
     setParticipants((prev) => prev.filter((_, i) => i !== index));
+  const toggleBlock = (id: string) =>
+    setActiveBlockIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const refine = async () => {
+    if (!path.trim()) return;
+    setError(null);
+    setRefining(true);
+    try {
+      const res = await refineLoopPrompt({
+        path: path.trim(),
+        task: task.trim() || "Definir la tarea desde cero.",
+        projectPath: currentProject?.path ?? path.trim(),
+        coordinationDir: coordinationDir.trim() || undefined
+      });
+      activateTab(res.sessionId);
+      setPendingRefine(res.refinedPath);
+    } catch (refineError) {
+      setError(refineError instanceof Error ? refineError.message : "Failed to start refine.");
+      setRefining(false);
+    }
+  };
 
   const start = async () => {
     setError(null);
@@ -113,6 +201,8 @@ const RelayPanel: React.FC = () => {
     try {
       const res = await startAgentLoop({
         path: path.trim(),
+        extraDirs,
+        coordinationDir: coordinationDir.trim() || undefined,
         task: task.trim(),
         participants: participants.map((p) => ({
           agent: p.agent,
@@ -168,6 +258,77 @@ const RelayPanel: React.FC = () => {
             />
           </label>
 
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-neutral-500">
+              Task not well-defined? pi will interview you and refine it.
+            </span>
+            <Button variant="outline" size="sm" onClick={() => void refine()} disabled={!path.trim() || refining}>
+              {refining ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              Refine with pi
+            </Button>
+          </div>
+          {refining && (
+            <p className="text-xs text-cyan-300/80">
+              pi is interviewing you in its tab — answer its questions; the refined task lands here automatically.
+            </p>
+          )}
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">Code folders (blocks)</span>
+              <button
+                type="button"
+                onClick={() => setBlockPicker(true)}
+                className="inline-flex items-center gap-1 rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100"
+              >
+                <FolderPlus size={12} />
+                Add block
+              </button>
+            </div>
+            {loopBlocks.length === 0 ? (
+              <p className="text-xs text-neutral-600">
+                No blocks yet. The working directory above is always included; add blocks to let agents
+                modify extra folders.
+              </p>
+            ) : (
+              loopBlocks.map((b) => (
+                <div
+                  key={b.id}
+                  className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950/50 px-2 py-1.5"
+                >
+                  <input
+                    type="checkbox"
+                    checked={activeBlockIds.includes(b.id)}
+                    onChange={() => toggleBlock(b.id)}
+                    className="h-4 w-4 accent-cyan-500"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-sm text-neutral-200">
+                    {b.label} <span className="text-neutral-600">· {b.path}</span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Remove block"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-red-400"
+                    onClick={() => void removeLoopBlock(b.id)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <label className="block space-y-1">
+            <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+              Coordination folder (optional)
+            </span>
+            <Input
+              value={coordinationDir}
+              onChange={(event) => setCoordinationDir(event.target.value)}
+              placeholder="Default: Orquester work folder (keeps chatter out of the repo)"
+            />
+          </label>
+
           <div className="space-y-2">
             <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
               Participants (role + skill, in relay order)
@@ -202,6 +363,22 @@ const RelayPanel: React.FC = () => {
                     onChange={(event) => updateParticipant(index, { role: event.target.value })}
                     placeholder="Role (e.g. Implementer, Reviewer, Tester)"
                   />
+                  {(skillsByAgent[p.agent]?.length ?? 0) > 0 && (
+                    <select
+                      value=""
+                      onChange={(event) => {
+                        if (event.target.value) updateParticipant(index, { skill: event.target.value });
+                      }}
+                      className="h-9 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-300 outline-none focus:ring-1 focus:ring-neutral-500"
+                    >
+                      <option value="">Insert installed skill…</option>
+                      {skillsByAgent[p.agent]!.map((s) => (
+                        <option key={s.name} value={s.description ? `${s.name}: ${s.description}` : s.name}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <textarea
                     value={p.skill ?? ""}
                     onChange={(event) => updateParticipant(index, { skill: event.target.value })}
@@ -310,6 +487,19 @@ const RelayPanel: React.FC = () => {
           )}
         </div>
       </div>
+
+      <FolderPickerModal
+        open={blockPicker}
+        title="Add a code folder block"
+        confirmLabel="Add block"
+        startDir="/"
+        onPick={(dir) => {
+          setBlockPicker(false);
+          const name = dir.replace(/\/+$/, "").split("/").pop() || dir;
+          void addLoopBlock(name, dir);
+        }}
+        onClose={() => setBlockPicker(false)}
+      />
     </>
   );
 };
