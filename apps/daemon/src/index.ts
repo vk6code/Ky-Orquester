@@ -46,6 +46,7 @@ import {
   expandVars,
   hiddenConfigPath,
   labelsConfigPath,
+  loopsDirPath,
   parseAppConfig,
   parseDaemonConfig,
   parseHiddenConfig,
@@ -76,6 +77,7 @@ interface ResolvedPaths {
   remotesFile: string;
   labelsFile: string;
   hiddenFile: string;
+  loopsDir: string;
   workspacesDir: string;
   logsDir: string;
   vars: ConfigVars;
@@ -120,6 +122,7 @@ export async function startDaemon(options: StartDaemonOptions = {}): Promise<Run
     remotesFile: remotesConfigPath(paths.baseDir),
     labelsFile: labelsConfigPath(paths.baseDir),
     hiddenFile: hiddenConfigPath(paths.baseDir),
+    loopsDir: loopsDirPath(paths.baseDir),
     workspacesDir: expandVars(config.workspacesDir, paths.vars),
     logsDir: expandVars(config.logsDir, paths.vars),
     vars: paths.vars
@@ -656,7 +659,11 @@ function createServer(
 
   // Gorila360 worktree bridge + Rails loop runner + plans catalog
   registerGorila360Routes(app, services);
-  registerAgentLoopRoutes(app, services);
+  registerAgentLoopRoutes(app, {
+    sessions: services.sessions,
+    broadcaster: services.broadcaster,
+    loopsDir: resolved.loopsDir
+  });
   registerGorila360PlanRoutes(app);
 
   // Sessions (PTYs)

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { useAppStore } from "../../store/app";
-import type { LoopRunResponse, LoopTargetKind } from "../../types";
+import type { AgentLoopParticipant, LoopRunResponse, LoopTargetKind } from "../../types";
 import { Button, Input } from "../ui";
 
 const AGENTS = [
@@ -82,7 +82,11 @@ const RelayPanel: React.FC = () => {
 
   const [path, setPath] = useState(currentProject?.path ?? "");
   const [task, setTask] = useState("");
-  const [sequence, setSequence] = useState<string[]>(["claude", "codex"]);
+  const [participants, setParticipants] = useState<AgentLoopParticipant[]>([
+    { agent: "claude", role: "Implementador", skill: "" },
+    { agent: "codex", role: "Revisor", skill: "" }
+  ]);
+  const [gitSnapshot, setGitSnapshot] = useState(false);
   const [maxRounds, setMaxRounds] = useState(3);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +98,14 @@ const RelayPanel: React.FC = () => {
   }, [currentProject?.path, path]);
 
   const running = agentLoop?.state === "running";
-  const canStart = Boolean(path.trim() && task.trim() && sequence.length > 0 && !running);
+  const canStart = Boolean(path.trim() && task.trim() && participants.length > 0 && !running);
+
+  const addParticipant = (agent: string) =>
+    setParticipants((prev) => [...prev, { agent, role: "", skill: "" }]);
+  const updateParticipant = (index: number, patch: Partial<AgentLoopParticipant>) =>
+    setParticipants((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)));
+  const removeParticipant = (index: number) =>
+    setParticipants((prev) => prev.filter((_, i) => i !== index));
 
   const start = async () => {
     setError(null);
@@ -103,8 +114,13 @@ const RelayPanel: React.FC = () => {
       const res = await startAgentLoop({
         path: path.trim(),
         task: task.trim(),
-        agents: sequence,
+        participants: participants.map((p) => ({
+          agent: p.agent,
+          role: p.role?.trim() || undefined,
+          skill: p.skill?.trim() || undefined
+        })),
         maxRounds,
+        gitSnapshot,
         projectPath: currentProject?.path ?? path.trim()
       });
       activateTab(res.sessionId);
@@ -153,27 +169,47 @@ const RelayPanel: React.FC = () => {
           </label>
 
           <div className="space-y-2">
-            <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">Agent sequence</span>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {sequence.length === 0 && (
-                <span className="text-xs text-neutral-600">Add at least one agent…</span>
-              )}
-              {sequence.map((id, index) => (
-                <span
-                  key={`${id}-${index}`}
-                  className="inline-flex items-center gap-1 rounded-full bg-neutral-800 py-1 pl-2.5 pr-1 text-xs text-neutral-200"
+            <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+              Participants (role + skill, in relay order)
+            </span>
+            {participants.length === 0 && (
+              <p className="text-xs text-neutral-600">Add at least one participant…</p>
+            )}
+            <div className="space-y-2">
+              {participants.map((p, index) => (
+                <div
+                  key={index}
+                  className="space-y-2 rounded-lg border border-neutral-800 bg-neutral-950/50 p-2.5"
                 >
-                  <span className="text-neutral-500">{index + 1}.</span>
-                  {AGENT_NAME[id] ?? id}
-                  <button
-                    type="button"
-                    aria-label="Remove"
-                    className="flex h-4 w-4 items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-700 hover:text-red-300"
-                    onClick={() => setSequence(sequence.filter((_, i) => i !== index))}
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-neutral-800 text-[10px] text-neutral-400">
+                      {index + 1}
+                    </span>
+                    <span className="flex-1 text-sm font-medium text-neutral-100">
+                      {AGENT_NAME[p.agent] ?? p.agent}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Remove participant"
+                      className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-red-400"
+                      onClick={() => removeParticipant(index)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                  <Input
+                    value={p.role ?? ""}
+                    onChange={(event) => updateParticipant(index, { role: event.target.value })}
+                    placeholder="Role (e.g. Implementer, Reviewer, Tester)"
+                  />
+                  <textarea
+                    value={p.skill ?? ""}
+                    onChange={(event) => updateParticipant(index, { skill: event.target.value })}
+                    rows={2}
+                    placeholder="Skill / instructions for this agent's turns…"
+                    className="w-full resize-y rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:ring-1 focus:ring-neutral-500"
+                  />
+                </div>
               ))}
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -181,7 +217,7 @@ const RelayPanel: React.FC = () => {
                 <button
                   key={agent.id}
                   type="button"
-                  onClick={() => setSequence([...sequence, agent.id])}
+                  onClick={() => addParticipant(agent.id)}
                   className="inline-flex items-center gap-1 rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100"
                 >
                   <Plus size={12} />
@@ -191,17 +227,29 @@ const RelayPanel: React.FC = () => {
             </div>
           </div>
 
-          <label className="flex items-center justify-between gap-3">
-            <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">Max rounds (full cycles)</span>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={maxRounds}
-              onChange={(event) => setMaxRounds(Math.max(1, Math.min(50, Number(event.target.value) || 1)))}
-              className="h-9 w-20 rounded-md border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-100 outline-none focus:ring-1 focus:ring-neutral-500"
-            />
-          </label>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
+              <input
+                type="checkbox"
+                checked={gitSnapshot}
+                onChange={(event) => setGitSnapshot(event.target.checked)}
+                className="h-4 w-4 rounded border-neutral-600 bg-neutral-950 accent-cyan-500"
+              />
+              <GitBranch size={14} className="text-neutral-500" />
+              Git snapshot per turn
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">Max rounds</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={maxRounds}
+                onChange={(event) => setMaxRounds(Math.max(1, Math.min(50, Number(event.target.value) || 1)))}
+                className="h-9 w-20 rounded-md border border-neutral-700 bg-neutral-950 px-3 text-sm text-neutral-100 outline-none focus:ring-1 focus:ring-neutral-500"
+              />
+            </label>
+          </div>
 
           <div className="flex items-center justify-end gap-2">
             {running && (
@@ -239,6 +287,7 @@ const RelayPanel: React.FC = () => {
                 <div className="mt-2 text-neutral-400">
                   Turn <span className="text-neutral-200">{agentLoop.round + 1}</span> · agent{" "}
                   <span className="text-neutral-200">{AGENT_NAME[agentLoop.agent] ?? agentLoop.agent}</span>
+                  {agentLoop.role && <span className="text-neutral-500"> · {agentLoop.role}</span>}
                 </div>
                 {agentLoop.message && <div className="mt-1 text-xs text-neutral-500">{agentLoop.message}</div>}
               </div>

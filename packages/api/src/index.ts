@@ -105,15 +105,27 @@ export interface LoopRunResponse {
  * baton for the next agent. The relay stops when an agent emits the
  * `<<LOOP_DONE>>` token or after `maxRounds` full cycles through `agents`.
  */
+/** One participant in a relay: an agent playing a role with a skill brief. */
+export interface AgentLoopParticipant {
+  /** Agent refId, e.g. "claude" | "codex" | "opencode" | "kimi" | "pi" | "gemini". */
+  agent: string;
+  /** Short role label, e.g. "Implementer", "Reviewer", "Tester". */
+  role?: string;
+  /** Free-text skill/specialization brief injected into this agent's turn. */
+  skill?: string;
+}
+
 export interface AgentLoopRequest {
-  /** Absolute path the agents run in (repo or directory). */
+  /** Absolute path the agents run in (the project; they edit real code here). */
   path: string;
-  /** The task to accomplish, handed between agents. */
+  /** The task to accomplish, handed between participants. */
   task: string;
-  /** Ordered agent refIds to rotate through, e.g. ["claude","codex"]. */
-  agents: string[];
-  /** Max full cycles through `agents` before stopping (safety cap). */
+  /** Ordered participants to rotate through. */
+  participants: AgentLoopParticipant[];
+  /** Max full cycles through `participants` before stopping (safety cap). */
   maxRounds: number;
+  /** Commit the project after each turn so every turn is a recoverable snapshot. */
+  gitSnapshot?: boolean;
   /** Project the loop's session belongs to (for tab grouping). */
   projectPath?: string;
 }
@@ -125,9 +137,9 @@ export interface AgentLoopResponse {
   /** Shell session that streams the whole relay (one tab). */
   sessionId: string;
   path: string;
-  agents: string[];
+  participants: AgentLoopParticipant[];
   maxRounds: number;
-  /** The shared baton file path. */
+  /** The shared baton file path (in Orquester's work folder, not the project). */
   batonPath: string;
 }
 
@@ -139,6 +151,8 @@ export interface AgentLoopStatus {
   round: number;
   /** Agent acting on the current/last turn. */
   agent: string;
+  /** Role of the current/last participant. */
+  role?: string;
   state: "running" | "done";
   /** Why the loop ended (only when state === "done"). */
   reason?: "completed" | "maxRounds" | "stopped" | "error";

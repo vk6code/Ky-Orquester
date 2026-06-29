@@ -78,5 +78,6 @@ export type {
   LoopTargetSpec,
   AgentLoopRequest,
   AgentLoopResponse,
-  AgentLoopStatus
+  AgentLoopStatus,
+  AgentLoopParticipant
 } from "@orquester/api";

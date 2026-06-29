@@ -92,6 +92,12 @@ export function hiddenConfigPath(baseDir: string): string {
   return joinPath(appConfigDir(baseDir), "hidden.json");
 }
 
+/** Per-loop coordination artifacts (baton, prompts, handoffs) live here — OUT
+ * of the project folder, so agents edit real code without polluting the repo. */
+export function loopsDirPath(baseDir: string): string {
+  return joinPath(appConfigDir(baseDir), "loops");
+}
+
 export function daemonConfigPath(baseDir: string): string {
   return joinPath(daemonConfigDir(baseDir), "daemon.json");
 }

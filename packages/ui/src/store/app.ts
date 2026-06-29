@@ -835,7 +835,8 @@ export const useAppStore = create<AppState>()(
         loopId: res.loopId,
         sessionId: res.sessionId,
         round: 0,
-        agent: res.agents[0] ?? "",
+        agent: res.participants[0]?.agent ?? "",
+        role: res.participants[0]?.role,
         state: "running"
       }
     });
